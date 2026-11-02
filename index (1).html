@@ -181,7 +181,7 @@ function compute(sd,sap,master){
     }else sdOnly.push([...base,list.length?'Batch tidak ada di SAP':'Barcode belum ada di master batch',note]);
   }
   const sapOnly=[];
-  sap.rows.forEach((r,i)=>{if(!used.has(r[iB]))sapOnly.push([r[P('Material')],r[P('Material Description')],r[iB],+sapQty(i).toFixed(2),r[iUn],r[P('Description of Storage Location')]||r[P('Storage Location')]])});
+  sap.rows.forEach((r,i)=>{if(!used.has(r[iB]))sapOnly.push([r[P('Material')],r[P('Material Description')],r[iB],+sapQty(i).toFixed(2),r[iUn],r[P('Storage Location')],r[P('Description of Storage Location')]])});
   return{sdOnly,sapOnly,ok,sdAll,sdHead:sd.head.filter(h=>h!=='Barcode')};
 }
 
@@ -221,7 +221,7 @@ const nf=n=>n.toLocaleString('id-ID');
 const files={sd:null,sap:null,master:null};let masterMap=null,masterInfo='';
 const TABS={
   sdOnly:{t:'Ada di Stock Detail, tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Alasan','Keterangan'],f:2,q:9},
-  sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Qty SAP','Unit','Lokasi'],f:5,q:3},
+  sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Qty SAP','Unit','Kode Lokasi','Lokasi'],f:6,q:3},
   ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Qty SAP','Selisih','Keterangan'],f:2,q:5}
 };
 let R=null,tab='sdOnly',view=[],shown=0,src={};
