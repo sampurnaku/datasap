@@ -41,6 +41,7 @@ td.n{text-align:right}.neg{color:var(--er)}.pos{color:var(--wr)}
 </style>
 </head>
 <body>
+<div id="upd" class="card hid" style="border-color:var(--pr)">Versi baru aplikasi tersedia. <button class="p" id="rl">Muat ulang</button> <span class="sub">(data yang sedang tampil akan hilang)</span></div>
 <h1>Cek Stock Detail vs SAP</h1>
 <p class="sub">Stock Detail (barcode) &harr; Master Batch &harr; Stock SAP (batch)</p>
 
@@ -352,7 +353,11 @@ let ip=null;
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();ip=e;$('#inst').classList.remove('hid')});
 addEventListener('appinstalled',()=>$('#inst').classList.add('hid'));
 $('#inst').onclick=async()=>{if(!ip)return;ip.prompt();await ip.userChoice;ip=null;$('#inst').classList.add('hid')};
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
+}
+$('#rl').onclick=()=>location.reload();
 (async()=>{
   const c=await kvGet('master');
   if(c){masterMap=buildMasterMap(pairsFromText(c.text));masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'}
