@@ -267,12 +267,7 @@ const LBL={sd:'Stock Detail',sap:'Stock SAP',master:'Master Batch'};let want=nul
 $('#pick').onclick=e=>{const b=e.target.closest('button[data-k]');if(!b)return;want=b.dataset.k;$('#fi').value='';$('#fi').click()};
 $('#fi').onchange=async e=>{
   const f=e.target.files[0];if(!f||!want)return;
-  st('Membaca '+f.name+'...');
-  try{
-    const k=await detect(f);
-    if(k!==want){st('File "'+f.name+'" bukan '+LBL[want]+(k?' (terdeteksi sebagai '+LBL[k]+')':' (kolom tidak sesuai)')+'. Pilih file yang benar.');return}
-    files[want]=f;st('');chips();
-  }catch(err){st('Gagal membaca '+f.name+': '+err.message)}
+  files[want]=f;st('');chips();
 };
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function loadTable(f,label){
