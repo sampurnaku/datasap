@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cek Stock Detail vs SAP</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b6bcb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cek Stock">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1b1f24;--mu:#6b7280;--bd:#e2e5ea;--pr:#0b6bcb;--ok:#15803d;--wr:#b45309;--er:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1f26;--tx:#e8ebef;--mu:#9aa3af;--bd:#2c333c;--pr:#4da3ff;--ok:#4ade80;--wr:#fbbf24;--er:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.4 system-ui,sans-serif;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
+h1{font-size:18px;margin:14px 0 2px}.sub{color:var(--mu);margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+.drop{border:2px dashed var(--bd);border-radius:10px;padding:16px;text-align:center;cursor:pointer}
+.drop.on{border-color:var(--pr)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{border:1px solid var(--bd);border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mu)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+button,select,input[type=search]{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button.p{background:var(--pr);color:#fff;border-color:var(--pr)}button:disabled{opacity:.5}
+#st{color:var(--mu);margin:8px 0 0;min-height:18px}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.sum div{border:1px solid var(--bd);border-radius:10px;padding:10px;cursor:pointer;background:var(--card)}
+.sum div.a{border-color:var(--pr);box-shadow:0 0 0 1px var(--pr)}
+.sum b{display:block;font-size:22px}.sum span{color:var(--mu);font-size:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;align-items:center}.bar input[type=search]{flex:1;min-width:140px}
+.tw{overflow-x:auto;border:1px solid var(--bd);border-radius:10px}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left}
+th{position:sticky;top:0;background:var(--card);font-size:12px;color:var(--mu)}
+td.n{text-align:right}.neg{color:var(--er)}.pos{color:var(--wr)}
+.hid{display:none}
+</style>
+</head>
+<body>
+<h1>Cek Stock Detail vs SAP</h1>
+<p class="sub">Stock Detail (barcode) &harr; Master Batch &harr; Stock SAP (batch)</p>
+
+<div class="card">
+  <label class="drop" id="drop">
+    <input id="fi" type="file" accept=".xlsx" multiple hidden>
+    <b>Pilih / tarik file Excel di sini</b><br>
+    <span class="sub">Stock Detail, Stock SAP, Master Batch &mdash; dikenali otomatis dari judul kolomnya</span>
+  </label>
+  <div class="chips" id="chips"></div>
+  <div class="bar"><button class="p" id="go" disabled>Proses</button><button id="clr">Hapus master tersimpan</button><button id="inst" class="hid">Pasang aplikasi</button></div>
+  <div id="st"></div>
+</div>
+
+<div id="res" class="hid">
+  <div class="sum" id="sum"></div>
+  <div class="bar">
+    <input type="search" id="q" placeholder="Cari barcode / batch / kode order...">
+    <select id="flt"></select>
+    <label id="dl" class="hid"><input type="checkbox" id="onlyd"> hanya selisih qty</label>
+    <button id="ex">Unduh semua (Excel)</button><button id="ext">Unduh tab ini (Excel)</button><button id="exc">CSV tab ini</button>
+  </div>
+  <div class="tw"><table><thead id="th"></thead><tbody id="tb"></tbody></table></div>
+  <div class="bar"><span id="cnt" class="sub"></span><button id="more" class="hid">Tampilkan lebih banyak</button></div>
+</div>
+
+<script>
+/*CORE*/
+// ---------- Pembaca xlsx streaming (tanpa library, hemat memori untuk file besar) ----------
+async function zipEntries(file){
+  const tail=new DataView(await file.slice(Math.max(0,file.size-66000),file.size).arrayBuffer());
+  let p=tail.byteLength-22;while(p>=0&&tail.getUint32(p,true)!==0x06054b50)p--;
+  if(p<0)throw new Error('Bukan file xlsx yang valid');
+  const n=tail.getUint16(p+10,true),sz=tail.getUint32(p+12,true),off=tail.getUint32(p+16,true);
+  const cd=new DataView(await file.slice(off,off+sz).arrayBuffer());const out={};let q=0;
+  for(let i=0;i<n;i++){
+    const nl=cd.getUint16(q+28,true),el=cd.getUint16(q+30,true),cl=cd.getUint16(q+32,true);
+    const name=new TextDecoder().decode(new Uint8Array(cd.buffer,q+46,nl));
+    out[name]={method:cd.getUint16(q+10,true),csize:cd.getUint32(q+20,true),off:cd.getUint32(q+42,true)};
+    q+=46+nl+el+cl;
+  }
+  return out;
+}
+async function* chunks(file,e){
+  const lh=new DataView(await file.slice(e.off,e.off+30).arrayBuffer());
+  const st=e.off+30+lh.getUint16(26,true)+lh.getUint16(28,true);
+  let s=file.slice(st,st+e.csize).stream();
+  if(e.method===8)s=s.pipeThrough(new DecompressionStream('deflate-raw'));
+  const rd=s.pipeThrough(new TextDecoderStream()).getReader();
+  try{for(;;){const{done,value}=await rd.read();if(done)return;yield value}}finally{rd.cancel().catch(()=>{})}
+}
+async function entryText(file,e){let t='';for await(const c of chunks(file,e))t+=c;return t}
+const dec=s=>s.indexOf('&')<0?s:s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi,(m,k)=>{
+  k=k.toLowerCase();if(k[0]==='#')return String.fromCodePoint(k[1]==='x'?parseInt(k.slice(2),16):+k.slice(1));
+  return{amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[k]});
+const colIdx=l=>{let n=0;for(const c of l)n=n*26+c.charCodeAt(0)-64;return n-1};
+
+// Hasil: array baris; sel string = nilai, sel number = indeks sharedStrings (di-resolve terpisah)
+async function readSheet(file,{cols,maxRows,onRows}={}){
+  const z=await zipEntries(file);
+  const wb=await entryText(file,z['xl/workbook.xml']);
+  const rid=/<sheet\b[^>]*r:id="([^"]+)"/.exec(wb)[1];
+  const rels=await entryText(file,z['xl/_rels/workbook.xml.rels']);
+  const tag=new RegExp('<Relationship\\b[^>]*Id="'+rid+'"[^>]*>').exec(rels)[0];
+  let tg=/Target="([^"]+)"/.exec(tag)[1];tg=tg[0]==='/'?tg.slice(1):'xl/'+tg;
+  const want=cols?new Set(cols):null,rows=[];let buf='';
+  const rowRe=/<row\b[^>]*[^\/]>([\s\S]*?)<\/row>/g,cellRe=/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  outer:for await(const ch of chunks(file,z[tg])){
+    buf+=ch;const end=buf.lastIndexOf('</row>');if(end<0)continue;
+    const part=buf.slice(0,end+6);buf=buf.slice(end+6);
+    rowRe.lastIndex=0;let m;
+    while((m=rowRe.exec(part))){
+      const r=[];cellRe.lastIndex=0;let c;const body=m[1];
+      while((c=cellRe.exec(body))){
+        const ci=colIdx(c[1]);if(want&&!want.has(ci))continue;
+        const inner=c[3];if(inner===undefined)continue;
+        const t=(/\bt="(\w+)"/.exec(c[2])||[])[1];
+        if(t==='inlineStr'){const x=/<t[^>]*>([^<]*)<\/t>/.exec(inner);r[ci]=x?dec(x[1]):''}
+        else{const v=/<v>([^<]*)<\/v>/.exec(inner);if(!v)continue;r[ci]=t==='s'?+v[1]:dec(v[1])}
+      }
+      rows.push(r);
+      if(maxRows&&rows.length>=maxRows)break outer;
+    }
+    if(onRows)onRows(rows.length);
+  }
+  return{rows,file,z};
+}
+async function resolve(sh,cols){
+  const need=new Set();
+  for(const r of sh.rows){if(cols){for(const c of cols)if(typeof r[c]==='number')need.add(r[c])}else r.forEach(v=>{if(typeof v==='number')need.add(v)})}
+  const map=new Map();let left=need.size,i=0,buf='';
+  if(left){
+    const re=/<t[^>]*>([^<]*)<\/t>/g;
+    scan:for await(const ch of chunks(sh.file,sh.z['xl/sharedStrings.xml'])){
+      buf+=ch;let pos=0,p;
+      while((p=buf.indexOf('</si>',pos))>=0){
+        if(need.has(i)){const si=buf.slice(pos,p);let t='',m;re.lastIndex=0;while((m=re.exec(si)))t+=m[1];map.set(i,dec(t));if(--left===0)break scan}
+        i++;pos=p+5;
+      }
+      buf=buf.slice(pos);
+    }
+  }
+  for(const r of sh.rows){
+    if(cols){for(const c of cols)if(typeof r[c]==='number')r[c]=map.get(r[c])??''}
+    else r.forEach((v,k)=>{if(typeof v==='number')r[k]=map.get(v)??''});
+  }
+  return sh.rows;
+}
+async function readHeader(file){const sh=await readSheet(file,{maxRows:1});const [h]=await resolve(sh);return{head:h.map(v=>String(v).trim()),sh}}
+const hix=(head,name)=>head.indexOf(name);
+
+// ---------- Logika pencocokan ----------
+function buildMasterMap(pairs){ // pairs: iterable [barcode,batch]
+  const m=new Map();
+  for(const[b,t]of pairs){
+    if(!b||b==='-'||!t)continue;
+    const o=m.get(b);
+    if(o===undefined)m.set(b,t);
+    else if(typeof o==='string'){if(o!==t)m.set(b,[o,t])}
+    else if(!o.includes(t))o.push(t);
+  }
+  return m;
+}
+const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n};
+function compute(sd,sap,master){
+  // sd/sap: {head, rows}
+  const S=n=>hix(sd.head,n),P=n=>hix(sap.head,n);
+  const iBc=S('Barcode'),iQ=S('Qty');
+  const iB=P('Batch'),iUn=P('Base Unit');
+  const stockCols=['Unrestricted Stock','Stock in Transfer (Storage Location)','Stock in Quality Inspection','Blocked Stock'].map(P).filter(i=>i>=0);
+  const sapBy=new Map();
+  sap.rows.forEach((r,i)=>{const b=r[iB];if(!b)return;(sapBy.get(b)||sapBy.set(b,[]).get(b)).push(i)});
+  const sapQty=i=>stockCols.reduce((a,c)=>a+num(sap.rows[i][c]),0);
+  const used=new Set(),sdOnly=[],ok=[],sdAll=[];
+  for(const r of sd.rows){
+    const bc=String(r[iBc]||'').trim();if(!bc)continue;
+    const c=master.get(bc),list=c===undefined?[]:typeof c==='string'?[c]:c;
+    list.forEach(b=>used.add(b));
+    const hit=list.find(b=>sapBy.has(b));
+    const note=list.length>1?'Barcode punya '+list.length+' batch: '+list.map(b=>b+(sapBy.has(b)?' (ada di SAP)':' (tidak ada di SAP)')).join(' ; '):'';
+    sdAll.push([bc,hit||list.join(' / '),hit?'Cocok':list.length?'Batch tidak ada di SAP':'Barcode belum ada di master batch',note,...sd.head.map((h,k)=>h==='Barcode'?null:r[k]).filter((v,k)=>sd.head[k]!=='Barcode')]);
+    const base=[bc,list.join(' / '),r[S('Jenis Proses')],r[S('Trans. Date')],r[S('Doc. Reff')],r[S('Kode Order')],r[S('Material')],r[S('Color')],r[S('Grade')],num(r[iQ])];
+    if(hit){
+      const qs=sapBy.get(hit).reduce((a,i)=>a+sapQty(i),0),isYd=sapBy.get(hit).every(i=>sap.rows[i][iUn]==='YD');
+      ok.push([bc,hit,r[S('Jenis Proses')],r[S('Kode Order')],r[S('Color')],num(r[iQ]),+qs.toFixed(2),isYd?+(num(r[iQ])-qs).toFixed(2):null,note]);
+    }else sdOnly.push([...base,list.length?'Batch tidak ada di SAP':'Barcode belum ada di master batch',note]);
+  }
+  const sapOnly=[];
+  sap.rows.forEach((r,i)=>{if(!used.has(r[iB]))sapOnly.push([r[P('Material')],r[P('Material Description')],r[iB],+sapQty(i).toFixed(2),r[iUn],r[P('Storage Location')],r[P('Description of Storage Location')]])});
+  return{sdOnly,sapOnly,ok,sdAll,sdHead:sd.head.filter(h=>h!=='Barcode')};
+}
+
+// ---------- Penulis xlsx sederhana (tanpa library, bisa offline) ----------
+function crc32(b){let t=crc32.t;if(!t){t=crc32.t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}}let r=-1;for(let i=0;i<b.length;i++)r=t[(r^b[i])&255]^(r>>>8);return(r^-1)>>>0}
+function makeXlsx(sheets){
+  const te=new TextEncoder(),x=v=>String(v).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const col=i=>{let s='';for(let n=i+1;n>0;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s};
+  const files=[],H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  files.push(['[Content_Types].xml',H+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>']);
+  files.push(['_rels/.rels',H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>']);
+  files.push(['xl/workbook.xml',H+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map(([n],i)=>`<sheet name="${x(n).slice(0,31)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')+'</sheets></workbook>']);
+  files.push(['xl/_rels/workbook.xml.rels',H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+'</Relationships>']);
+  sheets.forEach(([,aoa],i)=>{
+    let b=H+'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetData>';
+    aoa.forEach((r,ri)=>{b+=`<row r="${ri+1}">`;r.forEach((v,ci)=>{
+      if(v===null||v===undefined||v==='')return;const ref=col(ci)+(ri+1);
+      b+=typeof v==='number'&&isFinite(v)?`<c r="${ref}"><v>${v}</v></c>`:`<c r="${ref}" t="inlineStr"><is><t>${x(v)}</t></is></c>`});b+='</row>'});
+    files.push([`xl/worksheets/sheet${i+1}.xml`,b+'</sheetData></worksheet>']);
+  });
+  const parts=[],cd=[];let off=0;
+  for(const[name,txt]of files){
+    const nb=te.encode(name),d=te.encode(txt),crc=crc32(d);
+    const lh=new DataView(new ArrayBuffer(30));lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(12,0x21,true);lh.setUint32(14,crc,true);lh.setUint32(18,d.length,true);lh.setUint32(22,d.length,true);lh.setUint16(26,nb.length,true);
+    const ch=new DataView(new ArrayBuffer(46));ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(14,0x21,true);ch.setUint32(16,crc,true);ch.setUint32(20,d.length,true);ch.setUint32(24,d.length,true);ch.setUint16(28,nb.length,true);ch.setUint32(42,off,true);
+    parts.push(lh.buffer,nb,d);cd.push(ch.buffer,nb);off+=30+nb.length+d.length;
+  }
+  const csz=cd.reduce((a,p)=>a+p.byteLength,0),e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csz,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cd,e.buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+/*UI*/
+if(typeof document!=='undefined'){
+const $=s=>document.querySelector(s);
+const st=t=>$('#st').textContent=t;
+const nf=n=>n.toLocaleString('id-ID');
+const files={sd:null,sap:null,master:null};let masterMap=null,masterInfo='';
+const TABS={
+  sdOnly:{t:'Ada di Stock Detail, tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Alasan','Keterangan'],f:2,q:9},
+  sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Qty SAP','Unit','Kode Lokasi','Lokasi'],f:6,q:3},
+  ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Qty SAP','Selisih','Keterangan'],f:2,q:5}
+};
+let R=null,tab='sdOnly',view=[],shown=0,src={};
+
+// cache master di IndexedDB
+const idb=()=>new Promise((ok,er)=>{const q=indexedDB.open('cekstock',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>ok(q.result);q.onerror=()=>er(q.error)});
+const kvGet=async k=>{try{const d=await idb();return await new Promise(r=>{const q=d.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}catch(e){return null}};
+const kvSet=async(k,v)=>{try{const d=await idb();await new Promise(r=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=r;t.onerror=r})}catch(e){}};
+const kvDel=async k=>{try{const d=await idb();await new Promise(r=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').delete(k);t.oncomplete=r;t.onerror=r})}catch(e){}};
+
+function chips(){
+  const c=(ok,t)=>`<span class="chip ${ok?'ok':''}">${ok?'&#10003; ':''}${t}</span>`;
+  $('#chips').innerHTML=c(files.sd,files.sd?'Stock Detail: '+files.sd.name:'Stock Detail belum ada')+c(files.sap,files.sap?'Stock SAP: '+files.sap.name:'Stock SAP belum ada')+c(masterMap,masterMap?'Master batch: '+masterInfo:'Master batch belum ada');
+  $('#go').disabled=!(files.sd&&files.sap&&(masterMap||files.master));
+}
+async function detect(f){
+  const{head}=await readHeader(f);
+  if(head.includes('Barcode ID')&&head.includes('Batch'))return'master';
+  if(head.includes('Unrestricted Stock'))return'sap';
+  if(head.includes('Barcode')&&head.includes('Jenis Proses'))return'sd';
+  return null;
+}
+async function addFiles(list){
+  for(const f of list){
+    st('Membaca '+f.name+'...');
+    try{const k=await detect(f);if(!k){st('File "'+f.name+'" tidak dikenali (kolom tidak sesuai)');continue}files[k]=f}
+    catch(e){st('Gagal membaca '+f.name+': '+e.message);return}
+  }
+  st('');chips();
+}
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function loadTable(f,label){
+  const sh=await readSheet(f,{onRows:n=>st('Membaca '+label+': '+nf(n)+' baris')});
+  const rows=await resolve(sh);
+  const head=rows.shift().map(v=>String(v).trim());
+  return{head,rows};
+}
+function* pairsFromText(t){for(const l of t.split('\n')){const k=l.indexOf('\t');if(k>0)yield[l.slice(0,k),l.slice(k+1)]}}
+async function loadMaster(f){
+  const{head}=await readHeader(f);
+  const ib=head.indexOf('Batch'),ic=head.indexOf('Barcode ID');
+  const sh=await readSheet(f,{cols:[ib,ic],onRows:n=>st('Master batch: '+nf(n)+' baris dibaca...')});
+  st('Master batch: membaca teks batch & barcode...');
+  const rows=await resolve(sh,[ib,ic]);rows.shift();
+  const text=rows.filter(r=>r[ic]&&r[ic]!=='-'&&r[ib]).map(r=>r[ic]+'\t'+r[ib]).join('\n');
+  masterMap=buildMasterMap(pairsFromText(text));
+  masterInfo=nf(masterMap.size)+' barcode (baru diunggah)';
+  await kvSet('master',{text,date:new Date().toLocaleString('id-ID'),n:masterMap.size});
+}
+function setTab(k){
+  tab=k;document.querySelectorAll('.sum div').forEach(d=>d.classList.toggle('a',d.dataset.k===k));
+  const T=TABS[k];$('#th').innerHTML='<tr>'+T.h.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+  const vals=[...new Set(R[k].map(r=>r[T.f]))].filter(Boolean).sort();
+  $('#flt').innerHTML='<option value="">Semua '+T.h[T.f]+'</option>'+vals.map(v=>`<option>${esc(v)}</option>`).join('');
+  $('#q').value='';$('#onlyd').checked=false;$('#dl').classList.toggle('hid',k!=='ok');filter();
+}
+function filter(){
+  const T=TABS[tab],q=$('#q').value.trim().toLowerCase(),f=$('#flt').value,od=$('#onlyd').checked&&tab==='ok';
+  view=R[tab].filter(r=>(!f||r[T.f]===f)&&(!od||(r[7]!==null&&Math.abs(r[7])>0.01))&&(!q||r.join('|').toLowerCase().includes(q)));
+  shown=0;$('#tb').innerHTML='';more();
+}
+function more(){
+  const T=TABS[tab],part=view.slice(shown,shown+300);shown+=part.length;
+  $('#tb').insertAdjacentHTML('beforeend',part.map(r=>'<tr>'+r.map((v,i)=>{
+    const isn=typeof v==='number'||(v===null&&i===7);
+    const cls=(isn?'n':'')+(tab==='ok'&&i===7&&v?(v<0?' neg':' pos'):'');
+    return`<td class="${cls}">${v===null?'-':isn?nf(v):esc(v)}</td>`}).join('')+'</tr>').join(''));
+  $('#cnt').textContent='Menampilkan '+nf(shown)+' dari '+nf(view.length)+' baris';
+  $('#more').classList.toggle('hid',shown>=view.length);
+}
+function showResult(){
+  const diff=R.ok.filter(r=>r[7]!==null&&Math.abs(r[7])>0.01).length;
+  $('#sum').innerHTML=Object.keys(TABS).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k!=='sapOnly'?' ['+nf(R[k].filter(r=>r[r.length-1]).length)+' barcode 2 batch]':''}</span></div>`).join('');
+  $('#sum').onclick=e=>{const d=e.target.closest('div[data-k]');if(d)setTab(d.dataset.k)};
+  $('#res').classList.remove('hid');setTab(tab);
+}
+$('#fi').onchange=e=>addFiles([...e.target.files]);
+const dr=$('#drop');
+dr.ondragover=e=>{e.preventDefault();dr.classList.add('on')};dr.ondragleave=()=>dr.classList.remove('on');
+dr.ondrop=e=>{e.preventDefault();dr.classList.remove('on');addFiles([...e.dataTransfer.files])};
+$('#q').oninput=filter;$('#flt').onchange=filter;$('#onlyd').onchange=filter;$('#more').onclick=more;
+$('#go').onclick=async()=>{
+  $('#go').disabled=true;const t0=Date.now();
+  try{
+    if(files.master){await loadMaster(files.master);files.master=null}
+    const sd=await loadTable(files.sd,'Stock Detail'),sap=await loadTable(files.sap,'Stock SAP');
+    st('Mencocokkan data...');await new Promise(r=>setTimeout(r,30));
+    R=compute(sd,sap,masterMap);src={sd:files.sd.name,sap:files.sap.name,master:masterInfo};showResult();
+    st('Selesai dalam '+Math.round((Date.now()-t0)/1000)+' detik. Stock Detail '+nf(sd.rows.length)+' baris, SAP '+nf(sap.rows.length)+' baris.');
+  }catch(e){st('Gagal: '+e.message)}
+  chips();
+};
+$('#clr').onclick=async()=>{await kvDel('master');masterMap=null;files.master=null;chips();st('Master tersimpan dihapus.')};
+const save=(blob,name)=>{const l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),60000)};
+const nowTs=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return{txt:d.toLocaleString('id-ID'),fn:d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())}};
+const withTs=(h,rows,ts)=>[[...h,'Waktu Unduh'],...rows.map(r=>[...r,ts])];
+const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['File Stock Detail',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
+$('#ex').onclick=()=>{
+  st('Menyusun file Excel...');
+  setTimeout(()=>{
+    const t=nowTs(),S=[['SD tanpa SAP','sdOnly'],['SAP tanpa SD','sapOnly'],['Cocok','ok']].map(([n,k])=>[n,withTs(TABS[k].h,R[k],t.txt)]);
+    S.push(['Stock Detail + Batch',withTs(['Barcode','Batch','Status','Keterangan',...R.sdHead],R.sdAll,t.txt)]);
+    S.push(infoSheet(t.txt,S.map(([n,a])=>[n,a.length-1])));
+    const fn='hasil_cek_stock_'+t.fn+'.xlsx';save(makeXlsx(S),fn);
+    st('Diunduh: '+t.txt+' ('+fn+') - 4 sheet data + sheet Info.');
+  },30);
+};
+$('#ext').onclick=()=>{
+  const t=nowTs(),fn='hasil_'+tab+'_'+t.fn+'.xlsx',f=($('#flt').value||$('#q').value||$('#onlyd').checked)?' (sesuai filter/pencarian)':'';
+  save(makeXlsx([[TABS[tab].t.slice(0,30),withTs(TABS[tab].h,view,t.txt)],infoSheet(t.txt,[[TABS[tab].t+f,view.length]])]),fn);
+  st('Diunduh: '+t.txt+' ('+fn+')');
+};
+$('#exc').onclick=()=>{
+  const t=nowTs(),fn='hasil_'+tab+'_'+t.fn+'.csv';
+  const a=withTs(TABS[tab].h,view,t.txt).map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');
+  save(new Blob(['\ufeffsep=,\n'+a],{type:'text/csv'}),fn);st('Diunduh: '+t.txt+' ('+fn+')');
+};
+let ip=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();ip=e;$('#inst').classList.remove('hid')});
+addEventListener('appinstalled',()=>$('#inst').classList.add('hid'));
+$('#inst').onclick=async()=>{if(!ip)return;ip.prompt();await ip.userChoice;ip=null;$('#inst').classList.add('hid')};
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+(async()=>{
+  const c=await kvGet('master');
+  if(c){masterMap=buildMasterMap(pairsFromText(c.text));masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'}
+  chips();
+})();
+}
+</script>
+</body>
+</html>
