@@ -172,10 +172,11 @@ function compute(sd,sap,master){
   const S=n=>hix(sd.head,n),P=n=>hix(sap.head,n);
   const iBc=S('Barcode'),iQ=S('Qty');
   const iB=P('Batch'),iUn=P('Base Unit');
-  const stockCols=['Unrestricted Stock','Stock in Transfer (Storage Location)','Stock in Quality Inspection','Blocked Stock'].map(P).filter(i=>i>=0);
+  const colU=P('Unrestricted Stock'),colT=P('Stock in Transfer (Storage Location)');
+  const sapU=i=>num(sap.rows[i][colU]),sapT=i=>num(sap.rows[i][colT]);
   const sapBy=new Map();
   sap.rows.forEach((r,i)=>{const b=r[iB];if(!b)return;(sapBy.get(b)||sapBy.set(b,[]).get(b)).push(i)});
-  const sapQty=i=>stockCols.reduce((a,c)=>a+num(sap.rows[i][c]),0);
+  const sapQty=i=>sapU(i)+sapT(i); // Qty SAP = Unrestricted + Stock in Transfer
   const used=new Set(),sdOnly=[],ok=[],sdAll=[];
   for(const r of sd.rows){
     const bc=String(r[iBc]||'').trim();if(!bc)continue;
@@ -187,11 +188,18 @@ function compute(sd,sap,master){
     const base=[bc,list.join(' / '),r[S('Jenis Proses')],r[S('Trans. Date')],r[S('Doc. Reff')],r[S('Kode Order')],r[S('Material')],r[S('Color')],r[S('Grade')],num(r[iQ])];
     if(hit){
       const qs=sapBy.get(hit).reduce((a,i)=>a+sapQty(i),0),isYd=sapBy.get(hit).every(i=>sap.rows[i][iUn]==='YD');
-      ok.push([bc,hit,r[S('Jenis Proses')],r[S('Kode Order')],r[S('Color')],num(r[iQ]),+qs.toFixed(2),isYd?+(num(r[iQ])-qs).toFixed(2):null,note]);
+      const us=sapBy.get(hit).reduce((a,i)=>a+sapU(i),0),ts=sapBy.get(hit).reduce((a,i)=>a+sapT(i),0);
+      const q=num(r[iQ]),sel=isYd?+(q-qs).toFixed(2):null,kt=note?[note]:[];
+      if(sel!==null&&Math.abs(sel)>0.01)kt.push(q>0&&Math.abs(qs-2*q)<0.01?'Qty SAP = 2x Qty SD (kemungkinan double)':sel<0?'Qty SAP lebih besar dari Qty SD':'Qty SD lebih besar dari Qty SAP');
+      ok.push([bc,hit,r[S('Jenis Proses')],r[S('Kode Order')],r[S('Color')],q,+qs.toFixed(2),sel,+us.toFixed(2),+ts.toFixed(2),kt.join(' ; ')]);
     }else sdOnly.push([...base,list.length?'Batch tidak ada di SAP':'Barcode belum ada di master batch',note]);
   }
   const sapOnly=[];
-  sap.rows.forEach((r,i)=>{if(!used.has(r[iB]))sapOnly.push([r[P('Material')],r[P('Material Description')],r[iB],+sapQty(i).toFixed(2),r[iUn],r[P('Storage Location')],r[P('Description of Storage Location')]])});
+  sap.rows.forEach((r,i)=>{if(used.has(r[iB]))return;
+    const rws=sapBy.get(r[iB])||[i],ket=[];
+    if(rws.length>1)ket.push('Batch muncul di '+rws.length+' baris SAP (total qty '+(+rws.reduce((a,k)=>a+sapQty(k),0).toFixed(2))+')');
+    if(sapT(i)>0)ket.push('Ada stock in transfer');
+    sapOnly.push([r[P('Material')],r[P('Material Description')],r[iB],+sapU(i).toFixed(2),+sapT(i).toFixed(2),+sapQty(i).toFixed(2),r[iUn],r[P('Storage Location')],r[P('Description of Storage Location')],ket.join(' ; ')])});
   return{sdOnly,sapOnly,ok,sdAll,sdHead:sd.head.filter(h=>h!=='Barcode')};
 }
 
@@ -231,8 +239,8 @@ const nf=n=>n.toLocaleString('id-ID');
 const files={sd:null,sap:null,master:null};let masterMap=null,masterInfo='';
 const TABS={
   sdOnly:{t:'Ada di Stock Detail, tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Alasan','Keterangan'],f:2,q:9},
-  sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Qty SAP','Unit','Kode Lokasi','Lokasi'],f:6,q:3},
-  ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Qty SAP','Selisih','Keterangan'],f:2,q:5}
+  sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Unrestricted','In Transfer','Qty SAP (jumlah)','Unit','Kode Lokasi','Lokasi','Keterangan'],f:8,q:5},
+  ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Qty SAP (jumlah)','Selisih','SAP Unrestricted','SAP In Transfer','Keterangan'],f:2,q:5}
 };
 let R=null,tab='sdOnly',view=[],shown=0,src={};
 
@@ -308,7 +316,7 @@ function more(){
 }
 function showResult(){
   const diff=R.ok.filter(r=>r[7]!==null&&Math.abs(r[7])>0.01).length;
-  $('#sum').innerHTML=Object.keys(TABS).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k!=='sapOnly'?' ['+nf(R[k].filter(r=>r[r.length-1]).length)+' barcode 2 batch]':''}</span></div>`).join('');
+  $('#sum').innerHTML=Object.keys(TABS).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k!=='sapOnly'?' ['+nf(R[k].filter(r=>String(r[r.length-1]).startsWith('Barcode punya')).length)+' barcode 2 batch]':''}</span></div>`).join('');
   $('#sum').onclick=e=>{const d=e.target.closest('div[data-k]');if(d)setTab(d.dataset.k)};
   $('#res').classList.remove('hid');setTab(tab);
 }
