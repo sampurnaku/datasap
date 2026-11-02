@@ -1,6 +1,6 @@
 // Service worker: aplikasi tetap bisa dibuka tanpa internet.
 // Naikkan angka VERSI setiap kali index.html diganti agar HP mengambil versi baru.
-const VERSI='cekstock-v1';
+const VERSI='cekstock-v2';
 const FILE=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(VERSI).then(c=>c.addAll(FILE)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(n=>n!==VERSI).map(n=>caches.delete(n)))).then(()=>self.clients.claim()))});
