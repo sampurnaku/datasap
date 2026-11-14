@@ -172,7 +172,7 @@ const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n};
 function compute(sd,sap,master){
   // sd/sap: {head, rows}
   const S=n=>hix(sd.head,n),P=n=>hix(sap.head,n);
-  const iBc=S('Barcode'),iQ=S('Qty');
+  const iBc=S('Barcode'),iQ=S('Qty'),iBun=S('Bun');
   const iB=P('Batch'),iUn=P('Base Unit');
   const colU=P('Unrestricted Stock'),colT=P('Stock in Transfer (Storage Location)');
   const sapU=i=>num(sap.rows[i][colU]),sapT=i=>num(sap.rows[i][colT]);
@@ -191,9 +191,14 @@ function compute(sd,sap,master){
     if(hit){
       const qs=sapBy.get(hit).reduce((a,i)=>a+sapQty(i),0),isYd=sapBy.get(hit).every(i=>sap.rows[i][iUn]==='YD');
       const us=sapBy.get(hit).reduce((a,i)=>a+sapU(i),0),ts=sapBy.get(hit).reduce((a,i)=>a+sapT(i),0);
-      const q=num(r[iQ]),sel=isYd?+(q-qs).toFixed(2):null,kt=note?[note]:[];
-      if(sel!==null&&Math.abs(sel)>0.01)kt.push(q>0&&Math.abs(qs-2*q)<0.01?'Qty SAP = 2x Qty SD (kemungkinan double)':sel<0?'Qty SAP lebih besar dari Qty SD':'Qty SD lebih besar dari Qty SAP');
-      ok.push([bc,hit,r[S('Jenis Proses')],r[S('Kode Order')],r[S('Color')],q,+qs.toFixed(2),sel,+us.toFixed(2),+ts.toFixed(2),kt.join(' ; ')]);
+      const q=num(r[iQ]),bun=String(r[iBun]??'').trim(),ub=bun.toLowerCase();
+      const isM=['m','mtr','mtrs','meter','metre','meters','metres'].includes(ub),isY=['yard','yards','yd','yds'].includes(ub);
+      const qy=isM?+(q/0.9144).toFixed(2):isY?q:null; // Qty SD dalam yard (meter dibagi 0,9144)
+      const sel=isYd&&qy!==null?+(qy-qs).toFixed(2):null,kt=note?[note]:[];
+      if(isM)kt.push('Satuan SD meter, dikonversi ke yard (1 yard = 0,9144 m)');
+      else if(!isY)kt.push('Satuan SD "'+bun+'" tidak dikenali, tidak dikonversi');
+      if(sel!==null&&Math.abs(sel)>0.01)kt.push(qy>0&&Math.abs(qs-2*qy)<0.01?'Qty SAP = 2x Qty SD (kemungkinan double)':sel<0?'Qty SAP lebih besar dari Qty SD':'Qty SD lebih besar dari Qty SAP');
+      ok.push([bc,hit,r[S('Jenis Proses')],r[S('Kode Order')],r[S('Color')],q,bun,qy,+qs.toFixed(2),sel,+us.toFixed(2),+ts.toFixed(2),kt.join(' ; ')]);
     }else sdOnly.push([...base,list.length?'Batch tidak ada di SAP':'Barcode belum ada di master batch',note]);
   }
   const sapOnly=[];
@@ -242,7 +247,7 @@ const files={sd:null,sap:null,master:null};let masterMap=null,masterInfo='';
 const TABS={
   sdOnly:{t:'Ada di Stock Detail, tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Alasan','Keterangan'],f:2,q:9},
   sapOnly:{t:'Ada di SAP, tidak ada di Stock Detail',h:['Material','Deskripsi','Batch','Unrestricted','In Transfer','Qty SAP (jumlah)','Unit','Kode Lokasi','Lokasi','Keterangan'],f:8,q:5},
-  ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Qty SAP (jumlah)','Selisih','SAP Unrestricted','SAP In Transfer','Keterangan'],f:2,q:5}
+  ok:{t:'Cocok di keduanya',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty SD','Satuan SD','Qty SD (YD)','Qty SAP (jumlah)','Selisih','SAP Unrestricted','SAP In Transfer','Keterangan'],f:2,q:5}
 };
 let R=null,tab='sdOnly',view=[],shown=0,src={};
 
@@ -299,20 +304,20 @@ function setTab(k){
 }
 function filter(){
   const T=TABS[tab],q=$('#q').value.trim().toLowerCase(),f=$('#flt').value,od=$('#onlyd').checked&&tab==='ok';
-  view=R[tab].filter(r=>(!f||r[T.f]===f)&&(!od||(r[7]!==null&&Math.abs(r[7])>0.01))&&(!q||r.join('|').toLowerCase().includes(q)));
+  view=R[tab].filter(r=>(!f||r[T.f]===f)&&(!od||(r[9]!==null&&Math.abs(r[9])>0.01))&&(!q||r.join('|').toLowerCase().includes(q)));
   shown=0;$('#tb').innerHTML='';more();
 }
 function more(){
   const T=TABS[tab],part=view.slice(shown,shown+300);shown+=part.length;
   $('#tb').insertAdjacentHTML('beforeend',part.map(r=>'<tr>'+r.map((v,i)=>{
-    const isn=typeof v==='number'||(v===null&&i===7);
-    const cls=(isn?'n':'')+(tab==='ok'&&i===7&&v?(v<0?' neg':' pos'):'');
+    const isn=typeof v==='number'||(v===null&&(i===7||i===9));
+    const cls=(isn?'n':'')+(tab==='ok'&&i===9&&v?(v<0?' neg':' pos'):'');
     return`<td class="${cls}">${v===null?'-':isn?nf(v):esc(v)}</td>`}).join('')+'</tr>').join(''));
   $('#cnt').textContent='Menampilkan '+nf(shown)+' dari '+nf(view.length)+' baris';
   $('#more').classList.toggle('hid',shown>=view.length);
 }
 function showResult(){
-  const diff=R.ok.filter(r=>r[7]!==null&&Math.abs(r[7])>0.01).length;
+  const diff=R.ok.filter(r=>r[9]!==null&&Math.abs(r[9])>0.01).length;
   $('#sum').innerHTML=Object.keys(TABS).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k!=='sapOnly'?' ['+nf(R[k].filter(r=>String(r[r.length-1]).startsWith('Barcode punya')).length)+' barcode 2 batch]':''}</span></div>`).join('');
   $('#sum').onclick=e=>{const d=e.target.closest('div[data-k]');if(d)setTab(d.dataset.k)};
   $('#res').classList.remove('hid');setTab(tab);
