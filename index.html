@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cek PZZL vs SAP</title>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0b6bcb">
+<meta name="theme-color" content="#0b0d1f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Cek Stock">
 <link rel="icon" href="icon-192.png">
@@ -38,11 +38,44 @@ th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left}
 th{position:sticky;top:0;background:var(--card);font-size:12px;color:var(--mu)}
 td.n{text-align:right}.neg{color:var(--er)}.pos{color:var(--wr)}
 .hid{display:none}
+
+/* ===== tampilan disesuaikan dengan Menu Utama ===== */
+:root{--g1:#34d399;--g2:#059669;--gon:#03150d}
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:radial-gradient(1100px 760px at 15% -10%,#1b1f4d 0,transparent 60%),radial-gradient(900px 700px at 100% 110%,#3a1550 0,transparent 55%),#0b0d1f}
+.blob{position:absolute;border-radius:50%;filter:blur(64px);opacity:.4;animation:float 18s ease-in-out infinite}
+.b1{width:46vmax;height:46vmax;left:-14vmax;top:-12vmax;background:var(--g1)}
+.b2{width:36vmax;height:36vmax;right:-12vmax;top:18vh;background:var(--g2);animation-delay:-6s}
+.b3{width:40vmax;height:40vmax;left:18vw;bottom:-20vmax;background:#7c3aed;animation-delay:-11s}
+@keyframes float{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(6vmax,4vmax) scale(1.12)}66%{transform:translate(-4vmax,7vmax) scale(.94)}}
+.star{position:absolute;width:3px;height:3px;border-radius:50%;background:#fff;opacity:0;animation:tw 4s ease-in-out infinite}
+@keyframes tw{50%{opacity:.8}}
+@keyframes shine{to{background-position:250% 0}}
+.home{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px 0 12px;margin:2px 0 10px;border-radius:999px;text-decoration:none;color:#fff;font:600 14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:transform .25s,border-color .25s,box-shadow .25s;-webkit-tap-highlight-color:transparent}
+.home svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .25s}
+.home:hover,.home:focus-visible{border-color:rgba(255,255,255,.45);box-shadow:0 10px 26px -10px var(--g1);outline:none}
+.home:hover svg,.home:focus-visible svg{transform:translateX(-4px)}
+.home:active{transform:scale(.96)}
+.ico{flex:none;width:46px;height:46px;border-radius:15px;display:inline-grid;place-items:center;background:linear-gradient(135deg,var(--g1),var(--g2));box-shadow:0 10px 22px -8px var(--g1);-webkit-text-fill-color:initial}
+.ico svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ttl{background:linear-gradient(90deg,#fff,#86efc5,#fff);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shine 8s linear infinite}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.ttl{background:none;color:#fff;-webkit-text-fill-color:#fff}}
+
+html:root:root:root{--bg:#0b0d1f;--card:#151a3a;--tx:#f4f6ff;--mu:#aab4d8;--bd:#2b3262;--pr:#34d399;--ok:#6ee7b7;--wr:#ffc266;--er:#ff8fa3;color-scheme:dark}
+h1{display:flex;align-items:center;gap:12px;font-size:clamp(22px,6vw,30px);margin:6px 0 4px}
+.card,.sum div,.tw,button,select,input[type=search]{border-radius:14px}
+.card{border-color:rgba(255,255,255,.14);box-shadow:0 14px 34px -24px #000}
+button,select,input[type=search]{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18)}
+button.p{background:linear-gradient(135deg,var(--g1),var(--g2));border:0;color:var(--gon);font-weight:700;box-shadow:0 10px 22px -10px var(--g2)}
+.sum div{background:var(--card)}
+.sum div.a{border-color:var(--g1);box-shadow:0 0 0 1px var(--g1),0 10px 26px -14px var(--g1)}
+th{background:#1d2348}
 </style>
 </head>
 <body>
+<div class="bg" aria-hidden="true"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+<a class="home" href="/menuGit/" aria-label="Kembali ke Menu Utama"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Menu Utama</a>
 <div id="upd" class="card hid" style="border-color:var(--pr)">Versi baru aplikasi tersedia. <button class="p" id="rl">Muat ulang</button> <span class="sub">(data yang sedang tampil akan hilang)</span></div>
-<h1>Cek PZZL vs SAP</h1>
+<h1><i class="ico"><svg viewBox="0 0 24 24"><path d="M5 8h13l-3.5-3.5M19 16H6l3.5 3.5"/></svg></i><span class="ttl">Cek PZZL vs SAP</span></h1>
 <p class="sub">PZZL (barcode) &harr; Master Batch &harr; Stock SAP (batch)</p>
 
 <div class="card">
@@ -362,7 +395,7 @@ addEventListener('unhandledrejection',e=>st('Gagal: '+((e.reason&&e.reason.messa
 const save=(blob,name)=>{const l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),60000)};
 const nowTs=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return{txt:d.toLocaleString('id-ID'),fn:d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())}};
 const withTs=(h,rows,ts)=>[[...h,'Waktu Unduh'],...rows.map(r=>[...r,ts])];
-const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['Versi aplikasi',VERSI_APP],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
+const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
 $('#ex').onclick=()=>{
   st('Menyusun file Excel...');
   setTimeout(async()=>{
@@ -393,7 +426,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='16 Nov 2026 b (update otomatis)';$('#ver').textContent=VERSI_APP;
+const VERSI_APP='16 Nov 2026 (PZZL, konversi satuan)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
@@ -405,5 +438,6 @@ $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
 })();
 }
 </script>
+<script>for(let i=0;i<24;i++){const t=document.createElement('i');t.className='star';t.style.cssText='left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;animation-delay:'+(Math.random()*4).toFixed(2)+'s;animation-duration:'+(3+Math.random()*3).toFixed(2)+'s';document.querySelector('.bg').appendChild(t)}</script>
 </body>
 </html>
