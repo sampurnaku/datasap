@@ -362,7 +362,7 @@ addEventListener('unhandledrejection',e=>st('Gagal: '+((e.reason&&e.reason.messa
 const save=(blob,name)=>{const l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),60000)};
 const nowTs=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return{txt:d.toLocaleString('id-ID'),fn:d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())}};
 const withTs=(h,rows,ts)=>[[...h,'Waktu Unduh'],...rows.map(r=>[...r,ts])];
-const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
+const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['Versi aplikasi',VERSI_APP],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
 $('#ex').onclick=()=>{
   st('Menyusun file Excel...');
   setTimeout(async()=>{
@@ -393,7 +393,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='16 Nov 2026 (PZZL, konversi satuan)';$('#ver').textContent=VERSI_APP;
+const VERSI_APP='16 Nov 2026 b (update otomatis)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
