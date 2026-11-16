@@ -69,6 +69,8 @@ td.n{text-align:right}.neg{color:var(--er)}.pos{color:var(--wr)}
   <div class="bar"><span id="cnt" class="sub"></span><button id="more" class="hid">Tampilkan lebih banyak</button></div>
 </div>
 
+<p class="sub" style="text-align:center;margin:18px 0">Versi aplikasi: <b id="ver"></b> &middot; <a href="#" id="upd2" style="color:var(--pr)">Perbarui aplikasi</a></p>
+
 <script>
 /*CORE*/
 // ---------- Pembaca xlsx streaming (tanpa library, hemat memori untuk file besar) ----------
@@ -391,6 +393,11 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
+const VERSI_APP='16 Nov 2026 (PZZL, konversi satuan)';$('#ver').textContent=VERSI_APP;
+// Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
+$('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
+  try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
+  location.reload()};
 (async()=>{
   const c=await kvGet('master');
   if(c){masterMap=buildMasterMap(pairsFromText(c.text));masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'}
