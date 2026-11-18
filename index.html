@@ -83,6 +83,7 @@ th{background:#1d2348}
     <button data-k="sd">1. Pilih PZZL</button>
     <button data-k="sap">2. Pilih Stock SAP</button>
     <button data-k="master">3. Pilih Master Batch</button>
+    <button data-k="grp">4. Pilih Grouping (opsional)</button>
   </div>
   <input id="fi" type="file" accept=".xlsx" hidden>
   <div class="chips" id="chips"></div>
@@ -186,7 +187,7 @@ async function resolve(sh,cols){
   }
   return sh.rows;
 }
-const KNOWN=['Barcode','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Batch','Barcode ID','Unrestricted Stock','Stock in Transfer (Storage Location)','Material Description','Base Unit','Storage Location','Description of Storage Location'];
+const KNOWN=['Barcode','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty','Batch','Barcode ID','Unrestricted Stock','Stock in Transfer (Storage Location)','Material Description','Base Unit','Storage Location','Description of Storage Location','CORAK DEAL','GROUP'];
 const canon=v=>{const t=String(v??'').replace(/\s+/g,' ').trim(),l=t.toLowerCase();return KNOWN.find(k=>k.toLowerCase()===l)||t};
 async function readHeader(file){const sh=await readSheet(file,{maxRows:1});const [h]=await resolve(sh);return{head:h.map(canon),sh}}
 const hix=(head,name)=>head.indexOf(name);
@@ -294,18 +295,67 @@ async function makeXlsx(sheets){
   e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csz,true);e.setUint32(16,off,true);
   return new Blob([...parts,...cd,e.buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
+
+// ---------- Grouping material ----------
+const normG=g=>/^\d+$/.test(g)?String(+g):g; // "073" dan "73" dianggap sama
+function groupOf(m){ // dari kolom Material PZZL: 3 angka di belakang; "JL" -> 3 angka sebelum JL; KNT/KNIT -> KNT
+  const t=String(m??'').trim().toUpperCase();if(!t)return '';
+  if(/^(KNT|KNIT)/.test(t))return 'KNT';
+  const j=/(\d{3})[^\dA-Z]*JL/.exec(t);if(j)return normG(j[1]);
+  const base=t.split(/[-\s]/)[0],d=base.replace(/\D/g,'');
+  if(d.length>=3)return normG(d.slice(-3));
+  if(d&&d.length===base.length)return normG(d);
+  return t.replace(/[^A-Z]/g,'').slice(0,3);
+}
+function buildGroupMap(pairs){const m=new Map();for(const[k,g]of pairs){const a=String(k??'').trim(),b=String(g??'').trim().toUpperCase();if(a&&b)m.set(a,normG(b))}return m}
+function groupPzzl(m,coreMap){ // kode material PZZL dicari dulu di file grouping (lewat kode inti); kalau tidak ada, pakai aturan 3 angka
+  const t=String(m??'').trim().toUpperCase();if(!t)return['',0];
+  if(/^(KNT|KNIT)/.test(t))return['KNT',0];
+  const base=/JL/.test(t)?t.split('JL')[0]:t.split(/[-\s]/)[0],key=/^\d{4,}$/.test(base.replace(/[^0-9A-Z]/g,''))?base.replace(/\D/g,''):'';
+  const g=key&&coreMap.get(key);
+  return g?[g,0]:[groupOf(t),1];
+}
+function computeGroup(sd,sap,gmap){
+  const coreMap=new Map();
+  for(const[k,g]of gmap){const c=k.toUpperCase().replace(/^F/,'').split('_')[0].replace(/[^0-9A-Z]/g,'').replace(/^[A-Z]+(?=\d)/,'');if(/^\d{4,}$/.test(c)&&!coreMap.has(c))coreMap.set(c,g)}
+  const S=n=>hix(sd.head,n),P=n=>hix(sap.head,n);
+  const iMat=S('Material'),iQ=S('Qty'),iBun=S('Bun'),iSM=P('Material'),iU=P('Unrestricted Stock'),iT=P('Stock in Transfer (Storage Location)'),iUn=P('Base Unit');
+  const G=new Map(),get=(g,u)=>{const k=g+'\t'+u;let o=G.get(k);if(!o){o={g,u,p:0,pc:0,su:0,st:0,sc:0,auto:0,pauto:0};G.set(k,o)}return o};
+  for(const r of sd.rows){
+    const bun=String(r[iBun]??'').trim(),ub=bun.toLowerCase(),q=num(r[iQ]);
+    const isM=['m','mtr','mtrs','meter','metre','meters','metres'].includes(ub),isY=['yard','yards','yd','yds'].includes(ub);
+    const u=isM||isY?'YD':bun?bun.toUpperCase():'(kosong)';
+    const[pg,pa]=groupPzzl(r[iMat],coreMap),o=get(pg||'(tanpa grup)',u);o.p+=isM?q/0.9144:q;o.pc++;o.pauto+=pa;
+  }
+  for(const r of sap.rows){
+    const m=String(r[iSM]??'').trim();if(!m)continue;
+    let g=gmap.get(m),auto=0;
+    if(g===undefined){auto=1;g=groupOf(m.replace(/^F/i,'').split('_')[0].replace(/[^0-9A-Za-z]/g,''))||'(tanpa grup)'}
+    const o=get(g,String(r[iUn]||'').toUpperCase()||'(kosong)');o.su+=num(r[iU]);o.st+=num(r[iT]);o.sc++;o.auto+=auto;
+  }
+  const f=v=>+v.toFixed(2);
+  return [...G.values()].map(o=>{
+    const sap=o.su+o.st,sel=f(sap-o.p),ket=[];
+    if(!o.pc)ket.push('Hanya ada di SAP');if(!o.sc)ket.push('Hanya ada di PZZL');
+    if(o.auto)ket.push(o.auto+' baris SAP tidak ada di file grouping (grup dihitung otomatis dari kode material)');
+    if(o.pauto)ket.push(o.pauto+' baris PZZL tidak ada di file grouping (grup dari 3 angka di belakang kode material)');
+    if(o.st<0)ket.push('Ada stock in transfer negatif ('+f(o.st)+')');
+    return[o.g,o.u,f(o.p),f(o.su),f(o.st),f(sap),sel,Math.abs(sel)<=0.01?'Sama':sel<0?'SAP kurang dari PZZL':'SAP lebih dari PZZL',o.pc,o.sc,ket.join(' ; ')];
+  }).sort((a,b)=>Math.abs(b[6])-Math.abs(a[6]));
+}
 /*UI*/
 if(typeof document!=='undefined'){
 const $=s=>document.querySelector(s);
 const st=t=>$('#st').textContent=t;
 const nf=n=>n.toLocaleString('id-ID');
-const files={sd:null,sap:null,master:null};let masterMap=null,masterInfo='';
+const files={sd:null,sap:null,master:null,grp:null};let grpMap=null,grpInfo='';let masterMap=null,masterInfo='';
 const TABS={
   sdOnly:{t:'Ada di PZZL, tidak ada di SAP',n:'PZZL tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty PZZL','Satuan PZZL (Bun)','Qty PZZL (konversi)','Satuan konversi','Alasan','Keterangan'],f:2,q:9},
   sapOnly:{t:'Ada di SAP, tidak ada di PZZL',n:'SAP tidak ada di PZZL',h:['Material','Deskripsi','Batch','Unrestricted','In Transfer','Qty SAP (jumlah)','Unit','Kode Lokasi','Lokasi','Keterangan'],f:8,q:5},
+  grp:{t:'Grouping material (PZZL vs SAP)',n:'Grouping',h:['Group','Satuan','Qty PZZL','SAP Unrestricted','SAP In Transfer','Qty SAP (jumlah)','Selisih (SAP - PZZL)','Status','Jml baris PZZL','Jml baris SAP','Keterangan'],f:7,q:0},
   ok:{t:'Cocok di keduanya',n:'Cocok',h:['Barcode','Batch','Jenis Proses','Kode Order','Color','Qty PZZL','Satuan PZZL (Bun)','Qty PZZL (konversi)','Satuan konversi','SAP Unrestricted','SAP In Transfer','Qty SAP (jumlah)','Selisih','Keterangan'],f:2,q:5}
 };
-let R=null,tab='sdOnly',view=[],shown=0,src={};
+const SELCOL={ok:12,grp:6};let R=null,tab='sdOnly',view=[],shown=0,src={};
 
 // cache master di IndexedDB
 const idb=()=>new Promise((ok,er)=>{const q=indexedDB.open('cekstock',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>ok(q.result);q.onerror=()=>er(q.error)});
@@ -315,13 +365,13 @@ const kvDel=async k=>{try{const d=await idb();await new Promise(r=>{const t=d.tr
 
 function chips(){
   const c=(ok,t)=>`<span class="chip ${ok?'ok':''}">${ok?'&#10003; ':''}${t}</span>`;
-  $('#chips').innerHTML=c(files.sd,files.sd?'PZZL: '+files.sd.name:'PZZL belum ada')+c(files.sap,files.sap?'Stock SAP: '+files.sap.name:'Stock SAP belum ada')+c(masterMap||files.master,files.master?'Master batch: '+files.master.name+' (dibaca saat Proses)':masterMap?'Master batch: '+masterInfo:'Master batch belum ada');
-  document.querySelectorAll('#pick button').forEach(b=>{const k=b.dataset.k;b.classList.toggle('done',!!(k==='master'?(files.master||masterMap):files[k]))});
+  $('#chips').innerHTML=c(files.sd,files.sd?'PZZL: '+files.sd.name:'PZZL belum ada')+c(files.sap,files.sap?'Stock SAP: '+files.sap.name:'Stock SAP belum ada')+c(files.grp||grpMap,files.grp?'Grouping: '+files.grp.name+' (dibaca saat Proses)':grpMap?'Grouping: '+grpInfo:'Grouping belum ada (opsional)')+c(masterMap||files.master,files.master?'Master batch: '+files.master.name+' (dibaca saat Proses)':masterMap?'Master batch: '+masterInfo:'Master batch belum ada');
+  document.querySelectorAll('#pick button').forEach(b=>{const k=b.dataset.k;b.classList.toggle('done',!!(k==='master'?(files.master||masterMap):k==='grp'?(files.grp||grpMap):files[k]))});
   $('#go').disabled=!(files.sd&&files.sap&&(masterMap||files.master));
 }
 // Jenis file ditentukan oleh tombol yang dipilih (1/2/3), bukan oleh nama file. Yang diperiksa hanya kolom yang wajib ada.
-const REQ={sd:['Barcode'],sap:['Batch','Unrestricted Stock'],master:['Batch','Barcode ID']};
-const LBL={sd:'PZZL',sap:'Stock SAP',master:'Master Batch'};let want=null;
+const REQ={sd:['Barcode'],sap:['Batch','Unrestricted Stock'],master:['Batch','Barcode ID'],grp:['CORAK DEAL','GROUP']};
+const LBL={sd:'PZZL',sap:'Stock SAP',master:'Master Batch',grp:'Grouping'};let want=null;
 $('#pick').onclick=e=>{const b=e.target.closest('button[data-k]');if(!b)return;want=b.dataset.k;$('#fi').value='';$('#fi').click()};
 $('#fi').onchange=async e=>{
   const f=e.target.files[0];if(!f||!want)return;
@@ -351,6 +401,13 @@ async function loadMaster(f){
   masterInfo=nf(masterMap.size)+' barcode (baru diunggah)';
   await kvSet('master',{text,date:new Date().toLocaleString('id-ID'),n:masterMap.size});
 }
+async function loadGrp(f){
+  const{head}=await readHeader(f);const ik=head.indexOf('CORAK DEAL'),ig=head.indexOf('GROUP');
+  const sh=await readSheet(f,{cols:[ik,ig]});const rows=await resolve(sh,[ik,ig]);rows.shift();
+  const text=rows.filter(r=>r[ik]&&r[ig]!==undefined&&r[ig]!=='').map(r=>String(r[ik]).replace(/[\t\n]/g,' ')+'\t'+r[ig]).join('\n');
+  grpMap=buildGroupMap(pairsFromText(text));grpInfo=nf(grpMap.size)+' material (baru diunggah)';
+  await kvSet('grp',{text,date:new Date().toLocaleString('id-ID'),n:grpMap.size});
+}
 function setTab(k){
   tab=k;document.querySelectorAll('.sum div').forEach(d=>d.classList.toggle('a',d.dataset.k===k));
   const T=TABS[k];$('#th').innerHTML='<tr>'+T.h.map(h=>`<th>${h}</th>`).join('')+'</tr>';
@@ -366,15 +423,15 @@ function filter(){
 function more(){
   const T=TABS[tab],part=view.slice(shown,shown+300);shown+=part.length;
   $('#tb').insertAdjacentHTML('beforeend',part.map(r=>'<tr>'+r.map((v,i)=>{
-    const isn=typeof v==='number'||(v===null&&(i===7||i===12));
-    const cls=(isn?'n':'')+(tab==='ok'&&i===12&&v?(v<0?' neg':' pos'):'');
+    const isn=typeof v==='number'||(v===null&&tab==='ok'&&(i===7||i===12));
+    const cls=(isn?'n':'')+(SELCOL[tab]===i&&v?(v<0?' neg':' pos'):'');
     return`<td class="${cls}">${v===null?'-':isn?nf(v):esc(v)}</td>`}).join('')+'</tr>').join(''));
   $('#cnt').textContent='Menampilkan '+nf(shown)+' dari '+nf(view.length)+' baris';
   $('#more').classList.toggle('hid',shown>=view.length);
 }
 function showResult(){
   const diff=R.ok.filter(r=>r[12]!==null&&Math.abs(r[12])>0.01).length;
-  $('#sum').innerHTML=Object.keys(TABS).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k!=='sapOnly'?' ['+nf(R[k].filter(r=>String(r[r.length-1]).startsWith('Barcode punya')).length)+' barcode 2 batch]':''}</span></div>`).join('');
+  $('#sum').innerHTML=Object.keys(TABS).filter(k=>R[k]).map(k=>`<div data-k="${k}"><b>${nf(R[k].length)}</b><span>${TABS[k].t}${k==='ok'?' ('+nf(diff)+' selisih qty)':''}${k==='grp'?' ['+nf(R.grp.filter(r=>r[7]==='SAP kurang dari PZZL').length)+' SAP kurang, '+nf(R.grp.filter(r=>r[7]==='SAP lebih dari PZZL').length)+' SAP lebih]':''}${k==='sdOnly'||k==='ok'?' ['+nf(R[k].filter(r=>String(r[r.length-1]).startsWith('Barcode punya')).length)+' barcode 2 batch]':''}</span></div>`).join('');
   $('#sum').onclick=e=>{const d=e.target.closest('div[data-k]');if(d)setTab(d.dataset.k)};
   $('#res').classList.remove('hid');setTab(tab);
 }
@@ -383,9 +440,10 @@ $('#go').onclick=async()=>{
   $('#go').disabled=true;const t0=Date.now();
   try{
     if(files.master){await loadMaster(files.master);files.master=null}
+    if(files.grp){await loadGrp(files.grp);files.grp=null}
     const sd=await loadTable(files.sd,'PZZL'),sap=await loadTable(files.sap,'Stock SAP');
     st('Mencocokkan data...');await new Promise(r=>setTimeout(r,30));
-    R=compute(sd,sap,masterMap);src={sd:files.sd.name,sap:files.sap.name,master:masterInfo};showResult();
+    R=compute(sd,sap,masterMap);R.grp=grpMap?computeGroup(sd,sap,grpMap):null;src={sd:files.sd.name,sap:files.sap.name,master:masterInfo,grp:grpMap?grpInfo:'(tidak dipakai)'};showResult();
     st('Selesai dalam '+Math.round((Date.now()-t0)/1000)+' detik. PZZL '+nf(sd.rows.length)+' baris, SAP '+nf(sap.rows.length)+' baris.');
   }catch(e){st('Gagal: '+e.message)}
   chips();
@@ -395,15 +453,15 @@ addEventListener('unhandledrejection',e=>st('Gagal: '+((e.reason&&e.reason.messa
 const save=(blob,name)=>{const l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),60000)};
 const nowTs=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return{txt:d.toLocaleString('id-ID'),fn:d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())}};
 const withTs=(h,rows,ts)=>[[...h,'Waktu Unduh'],...rows.map(r=>[...r,ts])];
-const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['Versi aplikasi',VERSI_APP],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],[],['Sheet','Jumlah baris'],...rows]];
+const infoSheet=(ts,rows)=>['Info',[['Waktu unduh',ts],['Versi aplikasi',VERSI_APP],['File PZZL',src.sd],['File Stock SAP',src.sap],['Master batch',src.master],['Grouping',src.grp],[],['Sheet','Jumlah baris'],...rows]];
 $('#ex').onclick=()=>{
   st('Menyusun file Excel...');
   setTimeout(async()=>{
-    const t=nowTs(),S=['sdOnly','sapOnly','ok'].map(k=>[TABS[k].n,withTs(TABS[k].h,R[k],t.txt)]);
+    const t=nowTs(),S=['sdOnly','sapOnly','ok',...(R.grp?['grp']:[])].map(k=>[TABS[k].n,withTs(TABS[k].h,R[k],t.txt)]);
     S.push(['PZZL + Batch',withTs(['Barcode','Batch','Status','Keterangan',...R.sdHead],R.sdAll,t.txt)]);
     S.push(infoSheet(t.txt,S.map(([n,a])=>[n,a.length-1])));
     const fn='hasil_cek_stock_'+t.fn+'.xlsx';save(await makeXlsx(S),fn);
-    st('Diunduh: '+t.txt+' ('+fn+') - 4 sheet data + sheet Info.');
+    st('Diunduh: '+t.txt+' ('+fn+') - sheet data + sheet Info.');
   },30);
 };
 $('#ext').onclick=async()=>{
@@ -426,7 +484,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='18 Nov 2026 (urutan kolom Cocok, selisih SAP - PZZL)';$('#ver').textContent=VERSI_APP;
+const VERSI_APP='18 Nov 2026 (tambah tab Grouping material)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
@@ -434,6 +492,8 @@ $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
 (async()=>{
   const c=await kvGet('master');
   if(c){masterMap=buildMasterMap(pairsFromText(c.text));masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'}
+  const g=await kvGet('grp');
+  if(g){grpMap=buildGroupMap(pairsFromText(g.text));grpInfo=nf(g.n)+' material (tersimpan '+g.date+')'}
   chips();
 })();
 }
