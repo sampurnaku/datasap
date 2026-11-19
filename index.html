@@ -26,6 +26,9 @@ h1{font-size:18px;margin:14px 0 2px}.sub{color:var(--mu);margin:0 0 12px}
 .chip.ok{color:var(--ok);border-color:var(--ok)}
 button,select,input[type=search]{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
 button.p{background:var(--pr);color:#fff;border-color:var(--pr)}button:disabled{opacity:.5}
+textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);resize:vertical}
+details>summary{cursor:pointer;list-style:none}details>summary::-webkit-details-marker{display:none}details[open]>summary{margin-bottom:10px}
+details>summary .sub{display:block;margin:2px 0 0;font-size:12px}
 #st{color:var(--mu);margin:8px 0 0;min-height:18px}
 .sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .sum div{border:1px solid var(--bd);border-radius:10px;padding:10px;cursor:pointer;background:var(--card)}
@@ -92,6 +95,23 @@ th{background:#1d2348}
   <div class="bar"><button class="p" id="go" disabled>Proses</button><button id="clr">Hapus master tersimpan</button><button id="inst" class="hid">Pasang aplikasi</button></div>
   <div id="st"></div>
 </div>
+
+<details class="card" id="tCari">
+  <summary><b>Cari barcode / batch</b><span class="sub">Tempel banyak sekaligus, hasilnya barcode, batch, dan material SAP</span></summary>
+  <textarea id="qin" rows="5" placeholder="Satu per baris, atau pisahkan dengan koma / spasi. Boleh campur barcode dan batch.&#10;261019317654&#10;FAJ192531"></textarea>
+  <div class="bar"><button class="p" id="qgo">Cari</button><button id="qcp" class="hid">Salin hasil</button><button id="qex" class="hid">Unduh hasil (Excel)</button></div>
+  <div id="qst" class="sub"></div>
+  <div class="tw hid" id="qtw"><table><thead id="qth"></thead><tbody id="qtb"></tbody></table></div>
+</details>
+
+<details class="card" id="tPk">
+  <summary><b>Pengeluaran packing: cari batch &amp; material SAP</b><span class="sub">File Report Pengeluaran Packing Detail PerBarcode, ditambah Batch SAP dan Material SAP dari Master Batch</span></summary>
+  <input id="pfi" type="file" accept=".xlsx" hidden>
+  <div class="bar"><button id="ppick">Pilih file Pengeluaran</button><button class="p" id="pgo" disabled>Proses pengeluaran</button><button id="pex" class="hid">Unduh hasil (Excel)</button></div>
+  <div id="pst" class="sub"></div>
+  <div class="tw hid" id="ptw"><table><thead id="pth"></thead><tbody id="ptb"></tbody></table></div>
+  <div class="bar"><span id="pcnt" class="sub"></span><button id="pmore" class="hid">Tampilkan lebih banyak</button></div>
+</details>
 
 <div id="res" class="hid">
   <div class="sum" id="sum"></div>
@@ -363,7 +383,7 @@ if(typeof document!=='undefined'){
 const $=s=>document.querySelector(s);
 const st=t=>$('#st').textContent=t;
 const nf=n=>n.toLocaleString('id-ID');
-const files={sd:null,sap:null,master:null,grp:null};let grpMap=null,grpInfo='';let masterMap=null,masterInfo='';
+const files={sd:null,sap:null,master:null,grp:null};let grpMap=null,grpInfo='';let masterMap=null,masterInfo='',MTEXT='',MHASMAT=false;
 const TABS={
   sdOnly:{t:'Ada di PZZL, tidak ada di SAP',n:'PZZL tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty PZZL','Satuan PZZL (Bun)','Qty PZZL (konversi)','Satuan konversi','Alasan','Keterangan'],f:2,q:9},
   sapOnly:{t:'Ada di SAP, tidak ada di PZZL',n:'SAP tidak ada di PZZL',h:['Material','Deskripsi','Batch','Unrestricted','In Transfer','Qty SAP (jumlah)','Unit','Kode Lokasi','Lokasi','Keterangan'],f:8,q:5},
@@ -406,17 +426,17 @@ async function loadTable(f,label){
   const head=rows.shift().map(canon);
   return{head,rows};
 }
-function* pairsFromText(t){for(const l of t.split('\n')){const k=l.indexOf('\t');if(k>0)yield[l.slice(0,k),l.slice(k+1)]}}
+function* pairsFromText(t){for(const l of t.split('\n')){const k=l.indexOf('\t');if(k>0){const k2=l.indexOf('\t',k+1);yield k2<0?[l.slice(0,k),l.slice(k+1),'']:[l.slice(0,k),l.slice(k+1,k2),l.slice(k2+1)]}}}
 async function loadMaster(f){
   const{head}=await readHeader(f);
-  const ib=head.indexOf('Batch'),ic=head.indexOf('Barcode ID');
-  const sh=await readSheet(f,{cols:[ib,ic],onRows:n=>st('Master batch: '+nf(n)+' baris dibaca...')});
-  st('Master batch: membaca teks batch & barcode...');
-  const rows=await resolve(sh,[ib,ic]);rows.shift();
-  const text=rows.filter(r=>r[ic]&&r[ic]!=='-'&&r[ib]).map(r=>r[ic]+'\t'+r[ib]).join('\n');
-  masterMap=buildMasterMap(pairsFromText(text));
+  const ib=head.indexOf('Batch'),ic=head.indexOf('Barcode ID'),im=head.indexOf('Material'),cols=[ib,ic,im].filter(i=>i>=0);
+  const sh=await readSheet(f,{cols,onRows:n=>st('Master batch: '+nf(n)+' baris dibaca...')});
+  st('Master batch: membaca teks batch, barcode, dan material...');
+  const rows=await resolve(sh,cols);rows.shift();
+  const text=rows.filter(r=>r[ic]&&r[ic]!=='-'&&r[ib]).map(r=>r[ic]+'\t'+r[ib]+'\t'+(im>=0?String(r[im]??'').replace(/[\t\n]/g,' '):'')).join('\n');
+  masterMap=buildMasterMap(pairsFromText(text));MTEXT=text;MHASMAT=im>=0;
   masterInfo=nf(masterMap.size)+' barcode (baru diunggah)';
-  await kvSet('master',{text,date:new Date().toLocaleString('id-ID'),n:masterMap.size});
+  await kvSet('master',{text,v:2,date:new Date().toLocaleString('id-ID'),n:masterMap.size});
 }
 async function loadGrp(f){
   const{head}=await readHeader(f);const ik=head.indexOf('CORAK DEAL'),ig=head.indexOf('GROUP');
@@ -493,6 +513,109 @@ $('#exc').onclick=()=>{
   const a=withTs(TABS[tab].h,view,t.txt).map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');
   save(new Blob(['\ufeffsep=,\n'+a],{type:'text/csv'}),fn);st('Diunduh: '+t.txt+' ('+fn+')');
 };
+
+// ===== Alat bantu: cari barcode/batch dan pengeluaran packing (memakai Master Batch: barcode, batch, material SAP) =====
+const tick=()=>new Promise(r=>setTimeout(r,20));
+const tokens=t=>[...new Set(String(t).split(/[\s,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean))];
+async function ensureMaster(say){
+  if(files.master){say('Membaca Master Batch (lihat kemajuan di status atas)...');await loadMaster(files.master);files.master=null;st('');chips()}
+  if(!MTEXT){say('Pilih Master Batch dulu lewat tombol 3 di atas.');return false}
+  return true;
+}
+// satu kali baca seluruh master: ambil baris yang barcode-nya ada di wantBc atau batch-nya ada di wantBt
+function scanMaster(wantBc,wantBt){
+  const out=[],t=MTEXT;let i=0;
+  while(i<t.length){
+    let e=t.indexOf('\n',i);if(e<0)e=t.length;
+    const a=t.indexOf('\t',i);
+    if(a>0&&a<e){const b=t.indexOf('\t',a+1),has=b>0&&b<e,bc=t.slice(i,a),bt=has?t.slice(a+1,b):t.slice(a+1,e);
+      if(wantBc.has(bc)||wantBt.has(bt))out.push([bc,bt,has?t.slice(b+1,e):''])}
+    i=e+1;
+  }
+  return out;
+}
+const noMat='(tidak ada material: pilih ulang file Master Batch)';
+// ---------- Cari barcode / batch ----------
+let QOUT=null;const qst=t=>$('#qst').textContent=t;
+$('#qgo').onclick=async()=>{
+  const items=tokens($('#qin').value);if(!items.length){qst('Tempel barcode atau batch dulu.');return}
+  $('#qgo').disabled=true;
+  try{
+    if(!await ensureMaster(qst))return;
+    qst('Mencari '+nf(items.length)+' data...');await tick();
+    const set=new Set(items),hits=scanMaster(set,set),byBc=new Map(),byBt=new Map();
+    const add=(M,k,h)=>{let a=M.get(k);if(!a)M.set(k,a=[]);if(!a.some(x=>x[0]===h[0]&&x[1]===h[1]&&x[2]===h[2]))a.push(h)};
+    for(const h of hits){if(set.has(h[0]))add(byBc,h[0],h);if(set.has(h[1]))add(byBt,h[1],h)}
+    const out=[];let ok=0,miss=0;
+    for(const it of items){
+      const a=byBc.get(it),b=byBt.get(it),mt=x=>x[2]||(MHASMAT?'':noMat);
+      if(a){ok++;const nb=new Set(a.map(x=>x[1])).size;a.forEach(x=>out.push([it,'Barcode',x[0],x[1],mt(x),nb>1?'Barcode punya '+nb+' batch':'']))}
+      else if(b){ok++;b.forEach(x=>out.push([it,'Batch',x[0],x[1],mt(x),b.length>1?'Batch punya '+b.length+' barcode':'']))}
+      else{miss++;out.push([it,'-','','','','Tidak ditemukan di Master Batch'])}
+    }
+    QOUT={head:['Input','Dicari sebagai','Barcode','Batch','Material SAP','Keterangan'],rows:out,n:items.length,ok,miss};
+    $('#qth').innerHTML='<tr>'+QOUT.head.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+    $('#qtb').innerHTML=out.slice(0,500).map(r=>'<tr>'+r.map(v=>`<td>${esc(v)}</td>`).join('')+'</tr>').join('');
+    $('#qtw').classList.remove('hid');$('#qcp').classList.remove('hid');$('#qex').classList.remove('hid');
+    qst(nf(items.length)+' data: '+nf(ok)+' ditemukan, '+nf(miss)+' tidak ditemukan. '+(out.length>500?'Tabel menampilkan 500 baris pertama, unduh untuk semuanya.':nf(out.length)+' baris hasil.'));
+  }catch(e){qst('Gagal: '+e.message)}
+  $('#qgo').disabled=false;
+};
+$('#qcp').onclick=async()=>{
+  if(!QOUT)return;const tsv=[QOUT.head,...QOUT.rows].map(r=>r.join('\t')).join('\n');
+  try{await navigator.clipboard.writeText(tsv);qst('Hasil disalin. Tempel di Excel dengan Ctrl+V.')}catch(e){qst('Gagal menyalin. Gunakan tombol Unduh.')}
+};
+$('#qex').onclick=async()=>{
+  if(!QOUT)return;const t=nowTs(),fn='hasil_cari_'+t.fn+'.xlsx';
+  const info=['Info',[['Waktu unduh',t.txt],['Versi aplikasi',VERSI_APP],['Master batch',masterInfo],['Jumlah data dicari',QOUT.n],['Ditemukan',QOUT.ok],['Tidak ditemukan',QOUT.miss]]];
+  save(await makeXlsx([['Hasil cari',withTs(QOUT.head,QOUT.rows,t.txt)],info]),fn);qst('Diunduh: '+t.txt+' ('+fn+')');
+};
+// ---------- Pengeluaran packing ----------
+let pkFile=null,PK=null,pkShown=0;const pst=t=>$('#pst').textContent=t;
+$('#ppick').onclick=()=>{$('#pfi').value='';$('#pfi').click()};
+$('#pfi').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;pst('Membaca '+f.name+'...');
+  try{
+    const{head}=await readHeader(f);
+    if(!head.includes('Barcode')){pst('File "'+f.name+'" tidak bisa dipakai: kolom BARCODE tidak ditemukan di baris pertama sheet pertama.');return}
+    pkFile=f;$('#pgo').disabled=false;$('#ppick').classList.add('done');pst('Siap: '+f.name+'. Tekan Proses pengeluaran.');
+  }catch(err){pst('Gagal membaca '+f.name+': '+err.message)}
+};
+function pkMore(){
+  const part=PK.rows.slice(pkShown,pkShown+300);pkShown+=part.length;
+  $('#ptb').insertAdjacentHTML('beforeend',part.map(r=>'<tr>'+r.map(v=>`<td>${typeof v==='number'?nf(v):esc(v)}</td>`).join('')+'</tr>').join(''));
+  $('#pcnt').textContent='Menampilkan '+nf(pkShown)+' dari '+nf(PK.rows.length)+' baris';$('#pmore').classList.toggle('hid',pkShown>=PK.rows.length);
+}
+$('#pmore').onclick=pkMore;
+$('#pgo').onclick=async()=>{
+  $('#pgo').disabled=true;
+  try{
+    if(!await ensureMaster(pst))return;
+    const sh=await readSheet(pkFile,{onRows:n=>pst('Pengeluaran: '+nf(n)+' baris dibaca...')}),rows=await resolve(sh),head=rows.shift().map(v=>String(v??'').trim());
+    const ib=head.findIndex(h=>h.toUpperCase()==='BARCODE'),data=rows.filter(r=>String(r[ib]??'').trim());
+    pst('Mencari batch & material SAP untuk '+nf(data.length)+' barcode...');await tick();
+    const want=new Set(data.map(r=>String(r[ib]).trim())),by=new Map();
+    for(const h of scanMaster(want,new Set())){let a=by.get(h[0]);if(!a)by.set(h[0],a=[]);if(!a.some(x=>x[0]===h[1]&&x[1]===h[2]))a.push([h[1],h[2]])}
+    const numCol=head.map(h=>/^(PCS|QTY|JUMLAH|BERAT)$/i.test(h)),others=head.map((_,i)=>i).filter(i=>i!==ib);
+    let ok=0,miss=0,multi=0;
+    const out=data.map(r=>{
+      const bc=String(r[ib]).trim(),p=by.get(bc)||[],bs=[...new Set(p.map(x=>x[0]))],ms=[...new Set(p.map(x=>x[1]).filter(Boolean))];let kt='';
+      if(!p.length){miss++;kt='Barcode tidak ada di Master Batch'}
+      else{ok++;if(bs.length>1){multi++;kt='Barcode punya '+bs.length+' batch: '+p.map(x=>x[0]+' ('+(x[1]||'-')+')').join(' ; ')}if(!ms.length)kt=(kt?kt+' ; ':'')+noMat}
+      return[bc,bs.join(' / '),ms.join(' / '),kt,...others.map(i=>{const v=r[i]??'';return numCol[i]&&/^-?(0|[1-9]\d{0,9})(\.\d+)?$/.test(v)?+v:v})];
+    });
+    PK={head:['Barcode','Batch SAP','Material SAP','Keterangan',...others.map(i=>head[i])],rows:out,total:out.length,ok,miss,multi,file:pkFile.name};
+    $('#pth').innerHTML='<tr>'+PK.head.map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';$('#ptb').innerHTML='';pkShown=0;pkMore();
+    $('#ptw').classList.remove('hid');$('#pex').classList.remove('hid');
+    pst(nf(out.length)+' barcode: '+nf(ok)+' ditemukan di Master Batch, '+nf(miss)+' tidak ditemukan, '+nf(multi)+' barcode punya lebih dari satu batch.');
+  }catch(e){pst('Gagal: '+e.message)}
+  $('#pgo').disabled=false;
+};
+$('#pex').onclick=async()=>{
+  if(!PK)return;pst('Menyusun file Excel...');const t=nowTs(),fn='hasil_pengeluaran_'+t.fn+'.xlsx';
+  const info=['Info',[['Waktu unduh',t.txt],['Versi aplikasi',VERSI_APP],['File pengeluaran',PK.file],['Master batch',masterInfo],[],['Jumlah barcode',PK.total],['Ditemukan di Master Batch',PK.ok],['Tidak ditemukan',PK.miss],['Barcode punya lebih dari satu batch',PK.multi]]];
+  save(await makeXlsx([['Pengeluaran + Batch SAP',withTs(PK.head,PK.rows,t.txt)],info]),fn);pst('Diunduh: '+t.txt+' ('+fn+')');
+};
 let ip=null;
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();ip=e;$('#inst').classList.remove('hid')});
 addEventListener('appinstalled',()=>$('#inst').classList.add('hid'));
@@ -502,14 +625,14 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='18 Nov 2026 (Grouping: hanya yang ada di file grouping + detail material)';$('#ver').textContent=VERSI_APP;
+const VERSI_APP='19 Nov 2026 (cari barcode/batch + pengeluaran packing)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
   location.reload()};
 (async()=>{
   const c=await kvGet('master');
-  if(c){masterMap=buildMasterMap(pairsFromText(c.text));masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'}
+  if(c){masterMap=buildMasterMap(pairsFromText(c.text));MTEXT=c.text;MHASMAT=c.v===2;masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'+(MHASMAT?'':' - tanpa Material, pilih ulang file untuk fitur cari')}
   const g=await kvGet('grp');
   if(g){grpMap=buildGroupMap(pairsFromText(g.text));grpInfo=nf(g.n)+' material (tersimpan '+g.date+')'}
   chips();
