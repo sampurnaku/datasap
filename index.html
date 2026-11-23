@@ -87,7 +87,7 @@ th{background:#1d2348}
   <div class="pick" id="pick">
     <button data-k="sd">1. Pilih PZZL</button>
     <button data-k="sap">2. Pilih Stock SAP</button>
-    <button data-k="master">3. Pilih Master Batch</button>
+    <button data-k="master">3. Tambah Master Batch</button>
     <button data-k="grp">4. Pilih Grouping (opsional)</button>
   </div>
   <input id="fi" type="file" accept=".xlsx" hidden>
@@ -383,7 +383,7 @@ if(typeof document!=='undefined'){
 const $=s=>document.querySelector(s);
 const st=t=>$('#st').textContent=t;
 const nf=n=>n.toLocaleString('id-ID');
-const files={sd:null,sap:null,master:null,grp:null};let grpMap=null,grpInfo='';let masterMap=null,masterInfo='',MTEXT='',MHASMAT=false;
+const files={sd:null,sap:null,master:null,grp:null};let grpMap=null,grpInfo='';let masterMap=null,masterInfo='',MTEXT='',MHASMAT=false,MLAST=null;
 const TABS={
   sdOnly:{t:'Ada di PZZL, tidak ada di SAP',n:'PZZL tidak ada di SAP',h:['Barcode','Batch (master)','Jenis Proses','Trans. Date','Doc. Reff','Kode Order','Material','Color','Grade','Qty PZZL','Satuan PZZL (Bun)','Qty PZZL (konversi)','Satuan konversi','Alasan','Keterangan'],f:2,q:9},
   sapOnly:{t:'Ada di SAP, tidak ada di PZZL',n:'SAP tidak ada di PZZL',h:['Material','Deskripsi','Batch','Unrestricted','In Transfer','Qty SAP (jumlah)','Unit','Kode Lokasi','Lokasi','Keterangan'],f:8,q:5},
@@ -402,7 +402,7 @@ const kvDel=async k=>{try{const d=await idb();await new Promise(r=>{const t=d.tr
 
 function chips(){
   const c=(ok,t)=>`<span class="chip ${ok?'ok':''}">${ok?'&#10003; ':''}${t}</span>`;
-  $('#chips').innerHTML=c(files.sd,files.sd?'PZZL: '+files.sd.name:'PZZL belum ada')+c(files.sap,files.sap?'Stock SAP: '+files.sap.name:'Stock SAP belum ada')+c(files.grp||grpMap,files.grp?'Grouping: '+files.grp.name+' (dibaca saat Proses)':grpMap?'Grouping: '+grpInfo:'Grouping belum ada (opsional)')+c(masterMap||files.master,files.master?'Master batch: '+files.master.name+' (dibaca saat Proses)':masterMap?'Master batch: '+masterInfo:'Master batch belum ada');
+  $('#chips').innerHTML=c(files.sd,files.sd?'PZZL: '+files.sd.name:'PZZL belum ada')+c(files.sap,files.sap?'Stock SAP: '+files.sap.name:'Stock SAP belum ada')+c(files.grp||grpMap,files.grp?'Grouping: '+files.grp.name+' (dibaca saat Proses)':grpMap?'Grouping: '+grpInfo:'Grouping belum ada (opsional)')+c(masterMap||files.master,files.master?'Master batch: '+files.master.name+' (akan ditambahkan ke master tersimpan saat Proses)':masterMap?'Master batch: '+masterInfo:'Master batch belum ada');
   document.querySelectorAll('#pick button').forEach(b=>{const k=b.dataset.k;b.classList.toggle('done',!!(k==='master'?(files.master||masterMap):k==='grp'?(files.grp||grpMap):files[k]))});
   $('#go').disabled=!(files.sd&&files.sap&&(masterMap||files.master));
 }
@@ -433,10 +433,27 @@ async function loadMaster(f){
   const sh=await readSheet(f,{cols,onRows:n=>st('Master batch: '+nf(n)+' baris dibaca...')});
   st('Master batch: membaca teks batch, barcode, dan material...');
   const rows=await resolve(sh,cols);rows.shift();
-  const text=rows.filter(r=>r[ic]&&r[ic]!=='-'&&r[ib]).map(r=>r[ic]+'\t'+r[ib]+'\t'+(im>=0?String(r[im]??'').replace(/[\t\n]/g,' '):'')).join('\n');
-  masterMap=buildMasterMap(pairsFromText(text));MTEXT=text;MHASMAT=im>=0;
-  masterInfo=nf(masterMap.size)+' barcode (baru diunggah)';
-  await kvSet('master',{text,v:2,date:new Date().toLocaleString('id-ID'),n:masterMap.size});
+  // Gabungkan dengan master yang sudah tersimpan: data lama tetap, hanya pasangan (barcode, batch) yang belum ada yang ditambahkan.
+  const old=await kvGet('master');
+  const keep=new Map(); // "barcode\tbatch" -> material (urutan lama dipertahankan)
+  let oldN=0;
+  if(old&&old.text)for(const[b,t,m]of pairsFromText(old.text)){keep.set(b+'\t'+t,m||'');oldN++}
+  let added=0,filled=0,seen=0;
+  for(const r of rows){
+    if(!r[ic]||r[ic]==='-'||!r[ib])continue;
+    seen++;
+    const k=r[ic]+'\t'+r[ib],mat=im>=0?String(r[im]??'').replace(/[\t\n]/g,' '):'';
+    if(!keep.has(k)){keep.set(k,mat);added++}
+    else if(!keep.get(k)&&mat){keep.set(k,mat);filled++} // data lama tanpa material: lengkapi saja, tidak ditimpa
+  }
+  const parts=[];for(const[k,m]of keep)parts.push(k+'\t'+m);
+  const text=parts.join('\n');
+  const hasMat=im>=0||(old&&old.v===2);
+  masterMap=buildMasterMap(pairsFromText(text));MTEXT=text;MHASMAT=hasMat;
+  const date=new Date().toLocaleString('id-ID');
+  masterInfo=nf(masterMap.size)+' barcode (tersimpan '+date+'; file ini menambah '+nf(added)+' data baru'+(filled?', melengkapi '+nf(filled)+' material':'')+', '+nf(oldN)+' data lama tetap)';
+  await kvSet('master',{text,v:hasMat?2:1,date,n:masterMap.size});
+  MLAST={added,filled,seen,oldN};
 }
 async function loadGrp(f){
   const{head}=await readHeader(f);const ik=head.indexOf('CORAK DEAL'),ig=head.indexOf('GROUP');
@@ -475,14 +492,14 @@ function showResult(){
 $('#tb').onclick=e=>{const tr=e.target.closest('tr[data-g]');if(!tr)return;const g=tr.dataset.g;setTab('det');$('#flt').value=g;filter();$('#res').scrollIntoView({behavior:'smooth'})};
 $('#q').oninput=filter;$('#flt').onchange=filter;$('#onlyd').onchange=filter;$('#more').onclick=more;
 $('#go').onclick=async()=>{
-  $('#go').disabled=true;const t0=Date.now();
+  $('#go').disabled=true;const t0=Date.now();MLAST=null;
   try{
     if(files.master){await loadMaster(files.master);files.master=null}
     if(files.grp){await loadGrp(files.grp);files.grp=null}
     const sd=await loadTable(files.sd,'PZZL'),sap=await loadTable(files.sap,'Stock SAP');
     st('Mencocokkan data...');await new Promise(r=>setTimeout(r,30));
     R=compute(sd,sap,masterMap);{const gr=grpMap?computeGroup(sd,sap,grpMap):null;R.grp=gr&&gr.grp;R.det=gr&&gr.det;R.noG=gr&&gr.noG}src={sd:files.sd.name,sap:files.sap.name,master:masterInfo,grp:grpMap?grpInfo:'(tidak dipakai)'};showResult();
-    st('Selesai dalam '+Math.round((Date.now()-t0)/1000)+' detik. PZZL '+nf(sd.rows.length)+' baris, SAP '+nf(sap.rows.length)+' baris.');
+    st((MLAST?'Master batch: '+nf(MLAST.added)+' data baru ditambahkan, '+nf(MLAST.oldN)+' data lama tetap. ':'')+'Selesai dalam '+Math.round((Date.now()-t0)/1000)+' detik. PZZL '+nf(sd.rows.length)+' baris, SAP '+nf(sap.rows.length)+' baris.');
   }catch(e){st('Gagal: '+e.message)}
   chips();
 };
@@ -625,7 +642,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='19 Nov 2026 (cari barcode/batch + pengeluaran packing)';$('#ver').textContent=VERSI_APP;
+const VERSI_APP='23 Nov 2026 (master batch bertambah, tidak menimpa)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
