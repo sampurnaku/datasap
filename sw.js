@@ -1,7 +1,7 @@
 // Hanya menghapus simpanan miliknya sendiri (cekstock-*), tidak menyentuh aplikasi lain di alamat yang sama.
 // Service worker: halaman SELALU diambil dari internet dulu (jadi update langsung terlihat).
 // Bila internet mati atau lebih dari 4 detik tanpa jawaban, dipakai salinan yang tersimpan (tetap bisa offline).
-const VERSI='cekstock-v6';
+const VERSI='cekstock-v7';
 const FILE=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 const BATAS_MS=4000;
 self.addEventListener('install',e=>{e.waitUntil(caches.open(VERSI).then(c=>c.addAll(FILE.map(f=>new Request(f,{cache:'reload'})))).then(()=>self.skipWaiting()))});

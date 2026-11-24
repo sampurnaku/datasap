@@ -92,7 +92,9 @@ th{background:#1d2348}
   </div>
   <input id="fi" type="file" accept=".xlsx" hidden>
   <div class="chips" id="chips"></div>
-  <div class="bar"><button class="p" id="go" disabled>Proses</button><button id="clr">Hapus master tersimpan</button><button id="inst" class="hid">Pasang aplikasi</button></div>
+  <div class="bar"><button class="p" id="go" disabled>Proses</button><button id="clr">Hapus master tersimpan</button><button id="bkd">Unduh cadangan</button><button id="bkr">Pulihkan dari cadangan</button><button id="inst" class="hid">Pasang aplikasi</button></div>
+  <div class="sub" id="bkinfo"></div>
+  <input id="fb" type="file" accept=".gz,.json,.datasap" hidden>
   <div id="st"></div>
 </div>
 
@@ -452,7 +454,7 @@ async function loadMaster(f){
   masterMap=buildMasterMap(pairsFromText(text));MTEXT=text;MHASMAT=hasMat;
   const date=new Date().toLocaleString('id-ID');
   masterInfo=nf(masterMap.size)+' barcode (tersimpan '+date+'; file ini menambah '+nf(added)+' data baru'+(filled?', melengkapi '+nf(filled)+' material':'')+', '+nf(oldN)+' data lama tetap)';
-  await kvSet('master',{text,v:hasMat?2:1,date,n:masterMap.size});
+  await kvSet('master',{text,v:hasMat?2:1,date,n:masterMap.size});bkDirty();
   MLAST={added,filled,seen,oldN};
 }
 async function loadGrp(f){
@@ -460,7 +462,7 @@ async function loadGrp(f){
   const sh=await readSheet(f,{cols:[ik,ig]});const rows=await resolve(sh,[ik,ig]);rows.shift();
   const text=rows.filter(r=>r[ik]&&r[ig]!==undefined&&r[ig]!=='').map(r=>String(r[ik]).replace(/[\t\n]/g,' ')+'\t'+r[ig]).join('\n');
   grpMap=buildGroupMap(pairsFromText(text));grpInfo=nf(grpMap.size)+' material (baru diunggah)';
-  await kvSet('grp',{text,date:new Date().toLocaleString('id-ID'),n:grpMap.size});
+  await kvSet('grp',{text,date:new Date().toLocaleString('id-ID'),n:grpMap.size});bkDirty();
 }
 function setTab(k){
   tab=k;document.querySelectorAll('.sum div').forEach(d=>d.classList.toggle('a',d.dataset.k===k));
@@ -503,7 +505,7 @@ $('#go').onclick=async()=>{
   }catch(e){st('Gagal: '+e.message)}
   chips();
 };
-$('#clr').onclick=async()=>{await kvDel('master');masterMap=null;files.master=null;chips();st('Master tersimpan dihapus.')};
+$('#clr').onclick=async()=>{if(!confirm('Hapus master batch tersimpan? Pastikan sudah punya file cadangan.'))return;await kvDel('master');masterMap=null;MTEXT='';files.master=null;bkDirty();chips();st('Master tersimpan dihapus.')};
 addEventListener('unhandledrejection',e=>st('Gagal: '+((e.reason&&e.reason.message)||e.reason)));
 const save=(blob,name)=>{const l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),60000)};
 const nowTs=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return{txt:d.toLocaleString('id-ID'),fn:d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes())}};
@@ -642,7 +644,72 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{if(e.data==='update')$('#upd').classList.remove('hid')});
 }
 $('#rl').onclick=()=>location.reload();
-const VERSI_APP='23 Nov 2026 (master batch bertambah, tidak menimpa)';$('#ver').textContent=VERSI_APP;
+
+// ===== Cadangan: master batch + grouping disimpan ke satu file, bisa dipulihkan kapan saja =====
+const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+function bkShow(){
+  const last=ls.get('bk_last'),dirty=ls.get('bk_dirty')==='1',has=!!(MTEXT||grpMap);
+  $('#bkinfo').textContent=!has?'Belum ada master/grouping tersimpan.':last?('Cadangan terakhir: '+last+(dirty?' - ada perubahan setelah itu, disarankan unduh cadangan lagi.':' (data sama dengan cadangan).')):'Belum pernah mengunduh cadangan. Disarankan unduh cadangan master batch & grouping.';
+}
+function bkDirty(){ls.set('bk_dirty','1');bkShow()}
+async function gz(blob){return new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob()}
+$('#bkd').onclick=async()=>{
+  try{
+    const m=await kvGet('master'),g=await kvGet('grp');
+    if(!m&&!g){st('Belum ada master batch atau grouping tersimpan untuk dicadangkan.');return}
+    st('Menyusun file cadangan...');await tick();
+    const t=nowTs();
+    let blob=new Blob([JSON.stringify({app:'datasap',v:1,dibuat:t.txt,master:m||null,grp:g||null})],{type:'application/json'}),ext='json';
+    if(typeof CompressionStream!=='undefined'){blob=await gz(blob);ext='json.gz'}
+    save(blob,'cadangan_datasap_'+t.fn+'.'+ext);
+    ls.set('bk_last',t.txt);ls.set('bk_dirty','0');bkShow();
+    st('Cadangan diunduh ('+(blob.size/1048576).toFixed(1)+' MB): master '+(m?nf(m.n)+' barcode':'kosong')+', grouping '+(g?nf(g.n)+' material':'kosong')+'. Simpan file ini di tempat aman (Drive/flashdisk).');
+  }catch(e){st('Gagal membuat cadangan: '+e.message)}
+};
+$('#bkr').onclick=()=>{$('#fb').value='';$('#fb').click()};
+$('#fb').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    st('Membaca cadangan '+f.name+'...');await tick();
+    const u=new Uint8Array(await f.slice(0,2).arrayBuffer());let txt;
+    if(u[0]===0x1f&&u[1]===0x8b){
+      if(typeof DecompressionStream==='undefined'){st('Browser ini tidak bisa membuka file .gz. Pakai browser yang lebih baru.');return}
+      txt=await new Response(f.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    }else txt=await f.text();
+    const d=JSON.parse(txt);
+    if(!d||d.app!=='datasap'){st('File "'+f.name+'" bukan file cadangan DATASAP.');return}
+    const out=[];
+    // Master: digabung dengan yang ada sekarang (data sekarang tetap, yang belum ada ditambahkan)
+    if(d.master&&d.master.text){
+      const cur=await kvGet('master'),keep=new Map();let add=0,fill=0;
+      if(cur&&cur.text)for(const[b,t,m]of pairsFromText(cur.text))keep.set(b+'\t'+t,m||'');
+      const before=keep.size;
+      for(const[b,t,m]of pairsFromText(d.master.text)){const k=b+'\t'+t;if(!keep.has(k)){keep.set(k,m||'');add++}else if(!keep.get(k)&&m){keep.set(k,m);fill++}}
+      const parts=[];for(const[k,m]of keep)parts.push(k+'\t'+m);
+      const text=parts.join('\n'),hasMat=d.master.v===2||(cur&&cur.v===2),date=new Date().toLocaleString('id-ID');
+      masterMap=buildMasterMap(pairsFromText(text));MTEXT=text;MHASMAT=!!hasMat;
+      masterInfo=nf(masterMap.size)+' barcode (dipulihkan dari cadangan '+date+')';
+      await kvSet('master',{text,v:hasMat?2:1,date,n:masterMap.size});
+      out.push('master: '+nf(add)+' data ditambahkan'+(fill?', '+nf(fill)+' material dilengkapi':'')+', '+nf(before)+' data yang sudah ada tetap');
+    }
+    // Grouping: data sekarang diutamakan; yang belum ada ditambahkan dari cadangan
+    if(d.grp&&d.grp.text){
+      const cur=await kvGet('grp'),keep=new Map();let add=0;
+      if(cur&&cur.text)for(const[k,g]of pairsFromText(cur.text))keep.set(k,g);
+      const before=keep.size;
+      for(const[k,g]of pairsFromText(d.grp.text))if(!keep.has(k)){keep.set(k,g);add++}
+      const text=[...keep].map(([k,g])=>k+'\t'+g).join('\n');
+      grpMap=buildGroupMap(pairsFromText(text));grpInfo=nf(grpMap.size)+' material (dipulihkan dari cadangan)';
+      await kvSet('grp',{text,date:new Date().toLocaleString('id-ID'),n:grpMap.size});
+      out.push('grouping: '+nf(add)+' data ditambahkan, '+nf(before)+' data yang sudah ada tetap');
+    }
+    if(!out.length){st('File cadangan ini kosong (tidak ada master maupun grouping).');return}
+    ls.set('bk_dirty','1');bkShow();chips();
+    st('Cadangan dipulihkan ('+(d.dibuat||'tanggal tidak diketahui')+') - '+out.join('; ')+'.');
+  }catch(err){st('Gagal memulihkan cadangan: '+err.message)}
+};
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){} // minta browser jangan menghapus data aplikasi otomatis
+const VERSI_APP='24 Nov 2026 (cadangan master batch & grouping)';$('#ver').textContent=VERSI_APP;
 // Tombol ini membuang simpanan aplikasi lama lalu memuat ulang. Master Batch yang tersimpan TIDAK terhapus.
 $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   try{for(const n of await caches.keys())await caches.delete(n);for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}catch(err){}
@@ -652,7 +719,7 @@ $('#upd2').onclick=async e=>{e.preventDefault();st('Memperbarui aplikasi...');
   if(c){masterMap=buildMasterMap(pairsFromText(c.text));MTEXT=c.text;MHASMAT=c.v===2;masterInfo=nf(c.n)+' barcode (tersimpan '+c.date+')'+(MHASMAT?'':' - tanpa Material, pilih ulang file untuk fitur cari')}
   const g=await kvGet('grp');
   if(g){grpMap=buildGroupMap(pairsFromText(g.text));grpInfo=nf(g.n)+' material (tersimpan '+g.date+')'}
-  chips();
+  chips();bkShow();
 })();
 }
 </script>
